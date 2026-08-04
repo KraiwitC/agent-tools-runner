@@ -76,7 +76,7 @@ Direct integration with an LLM provider is not required for Version 1.
 Version 1 supports only these operations:
 
 - `search`: Search text files inside the selected workspace for a text value.
-- `read`: Read one or more complete text files in a single request.
+- `read`: Read one or more complete text files in a single request. This is the first executable Version 1 operation.
 - `edit`: Apply one or more exact text replacements to one existing text file.
 
 A request uses protocol version `1` and contains a non-empty ordered `actions` array. Every action has a unique `id` and an `operation`.
@@ -97,9 +97,11 @@ Starting `atr` opens an interactive terminal session for the selected workspace.
 The session accepts either:
 
 - a slash command beginning with `/`; or
-- one complete JSON request, including multiline pasted JSON.
+- a JSON request beginning with `{`.
 
-Agent Tools Runner should collect multiline input until one complete JSON object is available. It must distinguish incomplete input from malformed completed input and must not execute malformed requests.
+For a JSON request, Agent Tools Runner enters collection mode and accepts every pasted line until the user enters an empty line. It then validates the complete block exactly once. While collecting JSON, `/cancel` on its own line discards the current request.
+
+Ordinary non-command input that does not begin with `{` is ignored with a short terminal message. It must not create a structured error response or replace the clipboard contents.
 
 The minimum Version 1 slash commands are:
 
@@ -111,6 +113,8 @@ The minimum Version 1 slash commands are:
 - `/workspace`: Show the selected workspace.
 - `/clear`: Clear the terminal without deleting the last response.
 - `/exit`: End the session cleanly.
+
+During JSON collection, `/cancel` discards the current request and returns to the normal prompt.
 
 The terminal should display short human-readable summaries. The clipboard should contain the complete machine-readable prompt or JSON response without ANSI escape codes.
 
@@ -186,11 +190,15 @@ Version 1 does not need optional actions or continue-on-error behavior unless a 
 
 ### Text search
 
-Version 1 provides a basic text search implemented in Go.
+Version 1 provides a basic case-sensitive literal text search implemented in Go.
 
 It does not initially require regular expressions, fuzzy matching, external search programs, parallel searching, or advanced glob syntax.
 
-Search results should identify the relative file path and matching line information while applying reasonable result limits.
+Search results identify the workspace-relative file path, one-based line number, and matching line text. A search returns at most 100 matches and reports `truncated=true` when additional matches exist.
+
+Version 1 uses one centralized built-in directory exclusion set in `search.go`: `.git`, `.idea`, `node_modules`, `target`, `build`, `dist`, and `vendor`. `.vscode` remains searchable because it may contain useful project configuration. Configurable exclusions are deferred until a real use case requires them.
+
+Search skips symbolic links, files larger than the 1 MiB Version 1 limit, invalid UTF-8 files, binary-looking files containing null bytes, and files that cannot be opened. A workspace traversal failure returns a structured `SEARCH_FAILED` error.
 
 ### File reading
 
@@ -233,7 +241,9 @@ Agent Tools Runner must load the file and validate every requested replacement b
 
 If any replacement fails validation, the entire edit request fails and the file remains unchanged.
 
-After validation, all replacements are applied in memory and the completed result is written once.
+After validation, all replacements are applied in memory from the end of the file toward the beginning so earlier byte positions remain stable. The completed result is written once.
+
+Overlapping replacement ranges are rejected with `EDIT_TARGET_OVERLAP`. Duplicate or otherwise ambiguous edit targets are never guessed.
 
 Support for editing multiple files in one request is deferred until a real need is demonstrated.
 
@@ -241,9 +251,9 @@ Support for editing multiple files in one request is deferred until a real need 
 
 Agent Tools Runner should avoid leaving a partially written target file.
 
-The initial implementation should write the completed content to a temporary file in the same directory and then replace the target file using the safest simple approach supported by the target operating system.
+The initial implementation writes the completed content to a temporary file in the same directory, preserves the original file permissions, flushes and closes the temporary file, and then renames it over the target file. Temporary files are removed when a failure occurs.
 
-The implementation must report a failure if it cannot complete the write safely.
+The implementation must report `WRITE_FAILED` if it cannot complete the write safely. It must not report success until the final replacement succeeds.
 
 ### User authorization and review
 
@@ -454,6 +464,8 @@ Exact build and test commands will be added after the Go module and initial sour
 - Startup behavior: Generate and copy the LLM bootstrap prompt
 - Repository instructions: Include workspace `AGENTS.md` in the bootstrap prompt when present
 - Session commands: `/help`, `/prompt`, `/show-prompt`, `/copy`, `/show`, `/workspace`, `/clear`, and `/exit`
+- JSON submission: Paste a JSON object beginning with `{`, then enter an empty line to execute it
+- JSON cancellation: Enter `/cancel` on its own line while collecting a request
 - Session persistence: In memory only
 - Project instruction file: `AGENTS.md`
 - Assistant terminology: LLM-neutral

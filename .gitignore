@@ -1,0 +1,52 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+coverage.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# Vendor (uncomment if you don't commit vendor)
+/vendor/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env files
+.env
+.env.*
+
+# Logs
+*.log
+
+# Build output
+bin/
+dist/
+build/
+
+# Temporary files
+tmp/
+temp/
+
+# Delve debugger
+__debug_bin
+
+# Local configuration
+local.yaml
+local.yml
+config.local.*
