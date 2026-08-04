@@ -32,17 +32,17 @@ type Replacement struct {
 }
 
 type Response struct {
-	Version string          `json:"version"`
-	Status  string          `json:"status"`
-	Results []ActionResult  `json:"results"`
-	Error   *ResponseError  `json:"error,omitempty"`
+	Version string         `json:"version"`
+	Status  string         `json:"status"`
+	Results []ActionResult `json:"results"`
+	Error   *ResponseError `json:"error,omitempty"`
 }
 
 type ActionResult struct {
-	ID        string          `json:"id"`
-	Operation string          `json:"operation"`
-	Status    string          `json:"status"`
-	Data      *ActionData     `json:"data,omitempty"`
+	ID        string      `json:"id"`
+	Operation string      `json:"operation"`
+	Status    string      `json:"status"`
+	Data      *ActionData `json:"data,omitempty"`
 }
 
 type ActionData struct {
