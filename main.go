@@ -168,7 +168,6 @@ func handleCommand(command string, workspace string, bootstrapPrompt string, las
 	case "/clear":
 		fmt.Print("\033[H\033[2J")
 	case "/exit":
-		fmt.Println("Goodbye.")
 		shouldExit = true
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
