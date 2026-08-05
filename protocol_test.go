@@ -91,3 +91,67 @@ func TestCreateErrorResponseProducesValidJSON(t *testing.T) {
 		t.Fatalf("unexpected response: %#v", response)
 	}
 }
+
+func TestParseAndValidateRequestAcceptsFencedJSON(t *testing.T) {
+	requestText := "```json\n{\"version\":\"1\",\"actions\":[{\"id\":\"find\",\"operation\":\"search\",\"query\":\"needle\"}]}\n```"
+
+	request, err := parseAndValidateRequest(requestText)
+	if err != nil {
+		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
+	}
+	if len(request.Actions) != 1 || request.Actions[0].ID != "find" {
+		t.Fatalf("unexpected request: %#v", request)
+	}
+}
+
+func TestParseAndValidateRequestAcceptsTildeFencedJSON(t *testing.T) {
+	requestText := "~~~json\n{\"version\":\"1\",\"actions\":[{\"id\":\"find\",\"operation\":\"search\",\"query\":\"needle\"}]}\n~~~"
+
+	_, err := parseAndValidateRequest(requestText)
+	if err != nil {
+		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
+	}
+}
+
+func TestParseAndValidateRequestAcceptsTrailingBacktickArtifacts(t *testing.T) {
+	for _, suffix := range []string{"`", "``", "```"} {
+		t.Run(suffix, func(t *testing.T) {
+			requestText := "{\"version\":\"1\",\"actions\":[{\"id\":\"find\",\"operation\":\"search\",\"query\":\"needle\"}]}" + suffix
+
+			_, err := parseAndValidateRequest(requestText)
+			if err != nil {
+				t.Fatalf("parseAndValidateRequest returned an error: %v", err)
+			}
+		})
+	}
+}
+
+func TestParseAndValidateRequestPreservesBackticksInsideJSONStrings(t *testing.T) {
+	requestText := "{\"version\":\"1\",\"actions\":[{\"id\":\"edit\",\"operation\":\"edit\",\"path\":\"README.md\",\"replacements\":[{\"oldText\":\"Use `go test`\",\"newText\":\"Use `go test ./...`\"}]}]}"
+
+	request, err := parseAndValidateRequest(requestText)
+	if err != nil {
+		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
+	}
+	if request.Actions[0].Replacements[0].OldText != "Use `go test`" {
+		t.Fatalf("backticks inside JSON string were changed: %#v", request.Actions[0].Replacements[0])
+	}
+}
+
+func TestParseAndValidateRequestRejectsExplanatoryProse(t *testing.T) {
+	requestText := "Here is the request:\n{\"version\":\"1\",\"actions\":[{\"id\":\"find\",\"operation\":\"search\",\"query\":\"needle\"}]}"
+
+	_, err := parseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected explanatory prose to be rejected")
+	}
+}
+
+func TestParseAndValidateRequestRejectsMultipleObjects(t *testing.T) {
+	requestText := "{\"version\":\"1\",\"actions\":[{\"id\":\"first\",\"operation\":\"search\",\"query\":\"one\"}]}\n{\"version\":\"1\",\"actions\":[{\"id\":\"second\",\"operation\":\"search\",\"query\":\"two\"}]}"
+
+	_, err := parseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected multiple JSON objects to be rejected")
+	}
+}

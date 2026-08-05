@@ -100,8 +100,8 @@ func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, s
 			continue
 		}
 
-		if !strings.HasPrefix(input, "{") {
-			fmt.Println("Input ignored. ATR accepts slash commands or a JSON request beginning with \"{\".")
+		if !isJSONRequestStart(input) {
+			fmt.Println("Input ignored. ATR accepts slash commands or a JSON request beginning with \"{\" or a JSON code fence.")
 			continue
 		}
 
@@ -146,6 +146,7 @@ func handleCommand(command string, workspace string, bootstrapPrompt string, cli
 	case "/workspace":
 		fmt.Println(workspace)
 	case "/exit":
+		fmt.Println("Goodbye.")
 		shouldExit = true
 	default:
 		fmt.Printf("Unknown command: %s\n", command)

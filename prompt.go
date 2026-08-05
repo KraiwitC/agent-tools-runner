@@ -55,6 +55,7 @@ When returning an ATR request:
 - Put only the JSON request inside that code block.
 - Do not add explanatory prose before or after the code block.
 - The user will use the code block's Copy button and paste only its contents into ATR.
+- The copied content should begin with { and end with }. Markdown fence characters are presentation-only.
 - Use ordinary ASCII double quotes, not smart quotes.
 - Do not use comments or trailing commas.
 - Ensure the complete content inside the code block can be parsed as strict JSON.
@@ -88,6 +89,8 @@ Before returning a request, perform a final serialization check:
 3. Confirm that every source-code backslash inside a JSON string is escaped.
 4. Confirm that line endings and tabs use valid JSON escapes.
 5. Confirm that the content inside the fenced block is one complete strict JSON object.
+
+ATR tolerates an optional surrounding JSON fence and up to three accidental trailing backticks or tildes outside the JSON object. Do not rely on this tolerance: still return one clean, valid JSON request.
 
 If an ATR response reports INVALID_REQUEST, regenerate the complete request as valid JSON. Do not ask the user to repair escaping manually.
 

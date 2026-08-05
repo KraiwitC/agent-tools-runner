@@ -32,17 +32,17 @@ type Replacement struct {
 }
 
 type Response struct {
-	Version string         `json:"version"`
-	Status  string         `json:"status"`
-	Results []ActionResult `json:"results"`
-	Error   *ResponseError `json:"error,omitempty"`
+	Version string          `json:"version"`
+	Status  string          `json:"status"`
+	Results []ActionResult  `json:"results"`
+	Error   *ResponseError  `json:"error,omitempty"`
 }
 
 type ActionResult struct {
-	ID        string      `json:"id"`
-	Operation string      `json:"operation"`
-	Status    string      `json:"status"`
-	Data      *ActionData `json:"data,omitempty"`
+	ID        string          `json:"id"`
+	Operation string          `json:"operation"`
+	Status    string          `json:"status"`
+	Data      *ActionData     `json:"data,omitempty"`
 }
 
 type ActionData struct {
@@ -105,8 +105,78 @@ func collectJSONRequest(firstLine string, scanner lineScanner) (string, bool, er
 	}
 }
 
+func isJSONRequestStart(input string) bool {
+	trimmedInput := strings.TrimSpace(input)
+	if strings.HasPrefix(trimmedInput, "{") {
+		return true
+	}
+
+	lowerInput := strings.ToLower(trimmedInput)
+	return lowerInput == "```" || lowerInput == "```json" || lowerInput == "~~~" || lowerInput == "~~~json"
+}
+
+func normalizeJSONRequest(requestText string) (string, error) {
+	normalized := strings.TrimSpace(requestText)
+	normalized = removeOpeningJSONFence(normalized)
+	normalized = removeTrailingFenceArtifact(normalized)
+	normalized = strings.TrimSpace(normalized)
+
+	if !strings.HasPrefix(normalized, "{") {
+		return "", errors.New("JSON request must begin with an object")
+	}
+	if !strings.HasSuffix(normalized, "}") {
+		return "", errors.New("JSON request must end with an object")
+	}
+
+	return normalized, nil
+}
+
+func removeOpeningJSONFence(input string) string {
+	lineEnd := strings.IndexByte(input, '\n')
+	if lineEnd < 0 {
+		return input
+	}
+
+	firstLine := strings.TrimSpace(strings.TrimSuffix(input[:lineEnd], "\r"))
+	lowerFirstLine := strings.ToLower(firstLine)
+	if lowerFirstLine == "```" || lowerFirstLine == "```json" || lowerFirstLine == "~~~" || lowerFirstLine == "~~~json" {
+		return strings.TrimSpace(input[lineEnd+1:])
+	}
+
+	return input
+}
+
+func removeTrailingFenceArtifact(input string) string {
+	trimmedInput := strings.TrimSpace(input)
+	if len(trimmedInput) == 0 {
+		return trimmedInput
+	}
+
+	fenceCharacter := trimmedInput[len(trimmedInput)-1]
+	if fenceCharacter != '`' && fenceCharacter != '~' {
+		return trimmedInput
+	}
+
+	fenceLength := 0
+	for index := len(trimmedInput) - 1; index >= 0 && trimmedInput[index] == fenceCharacter && fenceLength < 3; index-- {
+		fenceLength++
+	}
+
+	withoutFence := strings.TrimSpace(trimmedInput[:len(trimmedInput)-fenceLength])
+	if strings.HasSuffix(withoutFence, "}") {
+		return withoutFence
+	}
+
+	return trimmedInput
+}
+
 func parseAndValidateRequest(requestText string) (Request, error) {
-	request, err := decodeRequest(requestText)
+	normalizedRequest, err := normalizeJSONRequest(requestText)
+	if err != nil {
+		return Request{}, err
+	}
+
+	request, err := decodeRequest(normalizedRequest)
 	if err != nil {
 		return Request{}, err
 	}
