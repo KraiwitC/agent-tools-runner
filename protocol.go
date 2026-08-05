@@ -11,6 +11,8 @@ import (
 )
 
 const protocolVersion = "1"
+const maximumActions = 100
+const maximumEditReplacements = 100
 
 type Request struct {
 	Version string   `json:"version"`
@@ -23,6 +25,7 @@ type Action struct {
 	Query        string        `json:"query,omitempty"`
 	Paths        []string      `json:"paths,omitempty"`
 	Path         string        `json:"path,omitempty"`
+	Content      string        `json:"content,omitempty"`
 	Replacements []Replacement `json:"replacements,omitempty"`
 }
 
@@ -32,26 +35,33 @@ type Replacement struct {
 }
 
 type Response struct {
-	Version string          `json:"version"`
-	Status  string          `json:"status"`
-	Results []ActionResult  `json:"results"`
-	Error   *ResponseError  `json:"error,omitempty"`
+	Version string         `json:"version"`
+	Status  string         `json:"status"`
+	Results []ActionResult `json:"results"`
+	Error   *ResponseError `json:"error,omitempty"`
 }
 
 type ActionResult struct {
-	ID        string          `json:"id"`
-	Operation string          `json:"operation"`
-	Status    string          `json:"status"`
-	Data      *ActionData     `json:"data,omitempty"`
+	ID        string      `json:"id"`
+	Operation string      `json:"operation"`
+	Status    string      `json:"status"`
+	Data      *ActionData `json:"data,omitempty"`
 }
 
 type ActionData struct {
 	Files               []ReadFileResult `json:"files,omitempty"`
 	Query               string           `json:"query,omitempty"`
 	Matches             []SearchMatch    `json:"matches,omitempty"`
+	Entries             []TreeEntry      `json:"entries,omitempty"`
 	Truncated           bool             `json:"truncated,omitempty"`
 	Path                string           `json:"path,omitempty"`
 	ReplacementsApplied int              `json:"replacementsApplied,omitempty"`
+	BytesWritten        int              `json:"bytesWritten,omitempty"`
+}
+
+type TreeEntry struct {
+	Path string `json:"path"`
+	Type string `json:"type"`
 }
 
 type SearchMatch struct {
@@ -223,6 +233,9 @@ func validateRequest(request Request) error {
 	if len(request.Actions) == 0 {
 		return errors.New("actions must contain at least one action")
 	}
+	if len(request.Actions) > maximumActions {
+		return fmt.Errorf("actions must not contain more than %d actions", maximumActions)
+	}
 
 	actionIDs := make(map[string]struct{}, len(request.Actions))
 	for index, action := range request.Actions {
@@ -248,6 +261,9 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		if strings.TrimSpace(action.Query) == "" {
 			return fmt.Errorf("actions[%d].query is required for search", index)
 		}
+		if len(action.Paths) != 0 || action.Path != "" || action.Content != "" || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for search", index)
+		}
 	case "read":
 		if len(action.Paths) == 0 {
 			return fmt.Errorf("actions[%d].paths must contain at least one path for read", index)
@@ -257,6 +273,9 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 				return fmt.Errorf("actions[%d].paths[%d] must not be empty", index, pathIndex)
 			}
 		}
+		if action.Query != "" || action.Path != "" || action.Content != "" || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for read", index)
+		}
 	case "edit":
 		if strings.TrimSpace(action.Path) == "" {
 			return fmt.Errorf("actions[%d].path is required for edit", index)
@@ -264,10 +283,33 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		if len(action.Replacements) == 0 {
 			return fmt.Errorf("actions[%d].replacements must contain at least one replacement for edit", index)
 		}
+		if len(action.Replacements) > maximumEditReplacements {
+			return fmt.Errorf("actions[%d].replacements must not contain more than %d replacements", index, maximumEditReplacements)
+		}
 		for replacementIndex, replacement := range action.Replacements {
 			if replacement.OldText == "" {
 				return fmt.Errorf("actions[%d].replacements[%d].oldText must not be empty", index, replacementIndex)
 			}
+		}
+		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for edit", index)
+		}
+	case "create":
+		if strings.TrimSpace(action.Path) == "" {
+			return fmt.Errorf("actions[%d].path is required for create", index)
+		}
+		if action.Content == "" {
+			return fmt.Errorf("actions[%d].content must not be empty for create", index)
+		}
+		if action.Query != "" || len(action.Paths) != 0 || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for create", index)
+		}
+	case "tree":
+		if strings.TrimSpace(action.Path) == "" {
+			return fmt.Errorf("actions[%d].path is required for tree", index)
+		}
+		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for tree", index)
 		}
 	default:
 		return fmt.Errorf("actions[%d].operation %q is not supported", index, action.Operation)
@@ -327,6 +369,27 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 		result.Data = &ActionData{
 			Path:                filepath.ToSlash(filepath.Clean(action.Path)),
 			ReplacementsApplied: replacementsApplied,
+		}
+		if responseError != nil {
+			result.Status = "error"
+			return result, responseError
+		}
+	case "create":
+		bytesWritten, relativePath, responseError := executeCreateAction(workspace, action, actionIndex)
+		result.Data = &ActionData{
+			Path:         relativePath,
+			BytesWritten: bytesWritten,
+		}
+		if responseError != nil {
+			result.Status = "error"
+			return result, responseError
+		}
+	case "tree":
+		entries, relativePath, truncated, responseError := executeTreeAction(workspace, action, actionIndex)
+		result.Data = &ActionData{
+			Path:      relativePath,
+			Entries:   entries,
+			Truncated: truncated,
 		}
 		if responseError != nil {
 			result.Status = "error"

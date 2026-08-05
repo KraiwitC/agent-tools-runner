@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -11,7 +12,9 @@ func TestParseAndValidateRequestAcceptsValidBatch(t *testing.T) {
 		"actions": [
 			{"id": "search", "operation": "search", "query": "needle"},
 			{"id": "read", "operation": "read", "paths": ["main.go"]},
-			{"id": "edit", "operation": "edit", "path": "main.go", "replacements": [{"oldText": "old", "newText": "new"}]}
+			{"id": "edit", "operation": "edit", "path": "main.go", "replacements": [{"oldText": "old", "newText": "new"}]},
+			{"id": "create", "operation": "create", "path": "created.txt", "content": "created content"},
+			{"id": "tree", "operation": "tree", "path": "."}
 		]
 	}`
 
@@ -19,8 +22,8 @@ func TestParseAndValidateRequestAcceptsValidBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
 	}
-	if len(request.Actions) != 3 {
-		t.Fatalf("expected three actions, got %d", len(request.Actions))
+	if len(request.Actions) != 5 {
+		t.Fatalf("expected five actions, got %d", len(request.Actions))
 	}
 }
 
@@ -30,6 +33,75 @@ func TestParseAndValidateRequestRejectsUnknownField(t *testing.T) {
 	_, err := parseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected unknown field validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsEmptyCreateContent(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"create","operation":"create","path":"created.txt","content":""}]}`
+
+	_, err := parseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected empty create content validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsCreateReplacements(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"create","operation":"create","path":"created.txt","content":"content","replacements":[{"oldText":"old","newText":"new"}]}]}`
+
+	_, err := parseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected create replacements validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsEditContent(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","content":"content","replacements":[{"oldText":"old","newText":"new"}]}]}`
+
+	_, err := parseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected edit content validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsEmptyEditOldText(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","replacements":[{"oldText":"","newText":"new"}]}]}`
+
+	_, err := parseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected empty edit oldText validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsTooManyActions(t *testing.T) {
+	actions := make([]Action, maximumActions+1)
+	for index := range actions {
+		actions[index] = Action{
+			ID:        fmt.Sprintf("action-%d", index),
+			Operation: "search",
+			Query:     "needle",
+		}
+	}
+
+	err := validateRequest(Request{Version: protocolVersion, Actions: actions})
+	if err == nil {
+		t.Fatal("expected action limit validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsTooManyEditReplacements(t *testing.T) {
+	replacements := make([]Replacement, maximumEditReplacements+1)
+	for index := range replacements {
+		replacements[index] = Replacement{OldText: fmt.Sprintf("old-%d", index), NewText: "new"}
+	}
+
+	err := validateRequest(Request{
+		Version: protocolVersion,
+		Actions: []Action{
+			{ID: "edit", Operation: "edit", Path: "main.go", Replacements: replacements},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected edit replacement limit validation error")
 	}
 }
 

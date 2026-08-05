@@ -80,6 +80,8 @@ func resolveWorkspace(path string) (string, error) {
 }
 
 func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, scanner *bufio.Scanner) {
+	lastResponse := ""
+
 	for {
 		fmt.Print("> ")
 		if !scanner.Scan() {
@@ -93,7 +95,7 @@ func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, s
 		}
 
 		if strings.HasPrefix(input, "/") {
-			shouldExit := handleCommand(input, workspace, bootstrapPrompt, clipboardReady)
+			shouldExit := handleCommand(input, workspace, bootstrapPrompt, lastResponse, clipboardReady)
 			if shouldExit {
 				return
 			}
@@ -108,6 +110,7 @@ func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, s
 		requestText, cancelled, err := collectJSONRequest(input, scanner)
 		if err != nil {
 			responseText := createErrorResponse("INVALID_REQUEST", err.Error())
+			lastResponse = responseText
 			presentResponse(responseText, clipboardReady)
 			continue
 		}
@@ -119,16 +122,18 @@ func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, s
 		request, err := parseAndValidateRequest(requestText)
 		if err != nil {
 			responseText := createErrorResponse("INVALID_REQUEST", err.Error())
+			lastResponse = responseText
 			presentResponse(responseText, clipboardReady)
 			continue
 		}
 
 		responseText := executeRequest(workspace, request)
+		lastResponse = responseText
 		presentResponse(responseText, clipboardReady)
 	}
 }
 
-func handleCommand(command string, workspace string, bootstrapPrompt string, clipboardReady bool) bool {
+func handleCommand(command string, workspace string, bootstrapPrompt string, lastResponse string, clipboardReady bool) bool {
 	shouldExit := false
 
 	switch command {
@@ -143,8 +148,25 @@ func handleCommand(command string, workspace string, bootstrapPrompt string, cli
 		}
 	case "/show-prompt":
 		fmt.Println(bootstrapPrompt)
+	case "/copy":
+		if lastResponse == "" {
+			fmt.Println("No JSON response is available to copy.")
+		} else if clipboardReady {
+			copyText(lastResponse)
+			fmt.Println("Last JSON response copied to clipboard.")
+		} else {
+			fmt.Println("Clipboard is unavailable. Type /show to display the last JSON response.")
+		}
+	case "/show":
+		if lastResponse == "" {
+			fmt.Println("No JSON response is available to show.")
+		} else {
+			fmt.Println(lastResponse)
+		}
 	case "/workspace":
 		fmt.Println(workspace)
+	case "/clear":
+		fmt.Print("\033[H\033[2J")
 	case "/exit":
 		fmt.Println("Goodbye.")
 		shouldExit = true
@@ -171,7 +193,10 @@ func printHelp() {
 	fmt.Println("  /help         Show available commands")
 	fmt.Println("  /prompt       Copy the LLM bootstrap prompt")
 	fmt.Println("  /show-prompt  Show the LLM bootstrap prompt")
+	fmt.Println("  /copy         Copy the last complete JSON response")
+	fmt.Println("  /show         Show the last complete JSON response")
 	fmt.Println("  /workspace    Show the current workspace")
+	fmt.Println("  /clear        Clear the terminal without deleting the last response")
 	fmt.Println("  /exit         Exit Agent Tools Runner")
 	fmt.Println()
 	fmt.Println("Paste a protocol version 1 JSON request, then press Enter on an empty line.")
