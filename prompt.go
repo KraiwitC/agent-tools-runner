@@ -9,7 +9,6 @@ import (
 )
 
 const agentsFileName = "AGENTS.md"
-
 const bootstrapInstructions = `# Agent Tools Runner Instructions
 
 ## Roles and Message Flow
@@ -271,9 +270,7 @@ func createBootstrapPrompt(workspace string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-
 	prompt := buildBootstrapPrompt(repositoryInstructions, agentsFileFound)
-
 	return prompt, agentsFileFound, nil
 }
 
@@ -284,25 +281,21 @@ func readRepositoryInstructions(workspace string) (string, bool, error) {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", false, nil
 		}
-
 		return "", false, fmt.Errorf("read %s: %w", agentsFileName, err)
 	}
-
 	return string(content), true, nil
 }
 
 func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool) string {
 	var prompt strings.Builder
 	prompt.WriteString(bootstrapInstructions)
-
 	if agentsFileFound {
 		prompt.WriteString(repositoryInstructions)
 		if !strings.HasSuffix(repositoryInstructions, "\n") {
 			prompt.WriteString("\n")
 		}
 	} else {
-		prompt.WriteString("No AGENTS.md file was found in the selected workspace.\n")
+		prompt.WriteString("No " + agentsFileName + " file was found in the selected workspace.\n")
 	}
-
 	return prompt.String()
 }

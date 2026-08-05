@@ -92,7 +92,6 @@ type lineScanner interface {
 func collectJSONRequest(firstLine string, scanner lineScanner) (string, bool, error) {
 	var input strings.Builder
 	input.WriteString(firstLine)
-
 	for {
 		fmt.Print("... ")
 		if !scanner.Scan() {
@@ -137,7 +136,6 @@ func normalizeJSONRequest(requestText string) (string, error) {
 	if !strings.HasSuffix(normalized, "}") {
 		return "", errors.New("JSON request must end with an object")
 	}
-
 	return normalized, nil
 }
 
@@ -146,13 +144,11 @@ func removeOpeningJSONFence(input string) string {
 	if lineEnd < 0 {
 		return input
 	}
-
 	firstLine := strings.TrimSpace(strings.TrimSuffix(input[:lineEnd], "\r"))
 	lowerFirstLine := strings.ToLower(firstLine)
 	if lowerFirstLine == "```" || lowerFirstLine == "```json" || lowerFirstLine == "~~~" || lowerFirstLine == "~~~json" {
 		return strings.TrimSpace(input[lineEnd+1:])
 	}
-
 	return input
 }
 
@@ -161,22 +157,18 @@ func removeTrailingFenceArtifact(input string) string {
 	if len(trimmedInput) == 0 {
 		return trimmedInput
 	}
-
 	fenceCharacter := trimmedInput[len(trimmedInput)-1]
 	if fenceCharacter != '`' && fenceCharacter != '~' {
 		return trimmedInput
 	}
-
 	fenceLength := 0
 	for index := len(trimmedInput) - 1; index >= 0 && trimmedInput[index] == fenceCharacter && fenceLength < 3; index-- {
 		fenceLength++
 	}
-
 	withoutFence := strings.TrimSpace(trimmedInput[:len(trimmedInput)-fenceLength])
 	if strings.HasSuffix(withoutFence, "}") {
 		return withoutFence
 	}
-
 	return trimmedInput
 }
 
@@ -185,16 +177,13 @@ func parseAndValidateRequest(requestText string) (Request, error) {
 	if err != nil {
 		return Request{}, err
 	}
-
 	request, err := decodeRequest(normalizedRequest)
 	if err != nil {
 		return Request{}, err
 	}
-
 	if err := validateRequest(request); err != nil {
 		return Request{}, err
 	}
-
 	return request, nil
 }
 
@@ -202,15 +191,12 @@ func decodeRequest(requestText string) (Request, error) {
 	var request Request
 	decoder := json.NewDecoder(strings.NewReader(requestText))
 	decoder.DisallowUnknownFields()
-
 	if err := decoder.Decode(&request); err != nil {
 		return Request{}, fmt.Errorf("decode JSON request: %w", err)
 	}
-
 	if err := ensureJSONEnd(decoder); err != nil {
 		return Request{}, err
 	}
-
 	return request, nil
 }
 
@@ -243,7 +229,6 @@ func validateRequest(request Request) error {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -314,7 +299,6 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 	default:
 		return fmt.Errorf("actions[%d].operation %q is not supported", index, action.Operation)
 	}
-
 	return nil
 }
 
@@ -324,7 +308,6 @@ func executeRequest(workspace string, request Request) string {
 		Status:  "success",
 		Results: make([]ActionResult, 0, len(request.Actions)),
 	}
-
 	for actionIndex, action := range request.Actions {
 		result, responseError := executeAction(workspace, action, actionIndex)
 		response.Results = append(response.Results, result)
@@ -334,7 +317,6 @@ func executeRequest(workspace string, request Request) string {
 			break
 		}
 	}
-
 	return marshalResponse(response)
 }
 
@@ -396,7 +378,6 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 			return result, responseError
 		}
 	}
-
 	return result, nil
 }
 
@@ -410,7 +391,6 @@ func createErrorResponse(code string, message string) string {
 			Message: message,
 		},
 	}
-
 	return marshalResponse(response)
 }
 
@@ -422,6 +402,5 @@ func marshalResponse(response Response) string {
 	if err := encoder.Encode(response); err != nil {
 		return fmt.Sprintf("{\"version\":%q,\"status\":\"error\",\"results\":[],\"error\":{\"code\":\"INTERNAL_ERROR\",\"message\":%q}}", protocolVersion, "Could not encode response")
 	}
-
 	return strings.TrimSuffix(output.String(), "\n")
 }

@@ -17,7 +17,6 @@ const scannerMaximumBufferSize = 2 * 1024 * 1024
 func main() {
 	workspaceFlag := flag.String("workspace", ".", "project workspace directory")
 	flag.Parse()
-
 	workspace, err := resolveWorkspace(*workspaceFlag)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to open workspace: %v\n", err)
@@ -40,7 +39,6 @@ func main() {
 		fmt.Printf("Project instructions: no %s found\n", agentsFileName)
 	}
 	fmt.Println()
-
 	if clipboardReady {
 		copyText(bootstrapPrompt)
 		fmt.Println("LLM bootstrap prompt copied to clipboard.")
@@ -63,32 +61,27 @@ func resolveWorkspace(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve absolute path: %w", err)
 	}
-
 	fileInfo, err := os.Lstat(absolutePath)
 	if err != nil {
 		return "", fmt.Errorf("inspect workspace: %w", err)
 	}
-
 	if fileInfo.Mode()&os.ModeSymlink != 0 {
 		return "", errors.New("workspace must not be a symbolic link")
 	}
 	if !fileInfo.IsDir() {
 		return "", errors.New("workspace is not a directory")
 	}
-
 	return filepath.Clean(absolutePath), nil
 }
 
 func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, scanner *bufio.Scanner) {
 	lastResponse := ""
-
 	for {
 		fmt.Print("> ")
 		if !scanner.Scan() {
 			fmt.Println()
 			return
 		}
-
 		input := strings.TrimSpace(scanner.Text())
 		if input == "" {
 			continue
@@ -135,7 +128,6 @@ func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, s
 
 func handleCommand(command string, workspace string, bootstrapPrompt string, lastResponse string, clipboardReady bool) bool {
 	shouldExit := false
-
 	switch command {
 	case "/help":
 		printHelp()
@@ -173,7 +165,6 @@ func handleCommand(command string, workspace string, bootstrapPrompt string, las
 		fmt.Printf("Unknown command: %s\n", command)
 		fmt.Println("Type /help for available commands.")
 	}
-
 	return shouldExit
 }
 
