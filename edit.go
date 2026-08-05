@@ -32,7 +32,7 @@ func executeEditAction(workspace string, action Action, actionIndex int) (int, *
 	}
 
 	updatedContent := applyPreparedReplacements(content, preparedReplacements)
-	if err := replaceFileSafely(resolvedPath, updatedContent, fileMode); err != nil {
+	if err := replaceFile(resolvedPath, updatedContent, fileMode); err != nil {
 		return 0, &ResponseError{
 			ActionID:    action.ID,
 			ActionIndex: actionIndex,
@@ -127,16 +127,14 @@ func prepareReplacements(content string, action Action, actionIndex int, relativ
 
 func applyPreparedReplacements(content string, replacements []preparedReplacement) string {
 	updated := content
-
 	for index := len(replacements) - 1; index >= 0; index-- {
 		replacement := replacements[index]
 		updated = updated[:replacement.Start] + replacement.NewText + updated[replacement.End:]
 	}
-
 	return updated
 }
 
-func replaceFileSafely(path string, content string, fileMode os.FileMode) error {
+func replaceFile(path string, content string, fileMode os.FileMode) error {
 	temporaryFile, err := os.CreateTemp(filepath.Dir(path), ".atr-edit-*")
 	if err != nil {
 		return fmt.Errorf("create temporary file: %w", err)

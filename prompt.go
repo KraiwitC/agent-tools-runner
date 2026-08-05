@@ -297,5 +297,6 @@ func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool) s
 	} else {
 		prompt.WriteString("No " + agentsFileName + " file was found in the selected workspace.\n")
 	}
+	prompt.WriteString("\n## User Instructions\n\n")
 	return prompt.String()
 }
