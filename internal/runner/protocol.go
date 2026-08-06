@@ -326,6 +326,16 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for mkdir", index)
 		}
+	case "delete":
+		if strings.TrimSpace(action.Path) == "" {
+			return fmt.Errorf("actions[%d].path is required for delete", index)
+		}
+		if action.ExpectedSHA256 != "" && !isValidSHA256(action.ExpectedSHA256) {
+			return fmt.Errorf("actions[%d].expectedSha256 must be empty or a lowercase SHA-256 hash for delete", index)
+		}
+		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for delete", index)
+		}
 	default:
 		return fmt.Errorf("actions[%d].operation %q is not supported", index, action.Operation)
 	}
@@ -433,6 +443,16 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 		result.Data = &ActionData{
 			Path: relativePath,
 			Type: "directory",
+		}
+		if responseError != nil {
+			result.Status = "error"
+			return result, responseError
+		}
+	case "delete":
+		relativePath, pathType, responseError := executeDeleteAction(workspace, action, actionIndex)
+		result.Data = &ActionData{
+			Path: relativePath,
+			Type: pathType,
 		}
 		if responseError != nil {
 			result.Status = "error"
