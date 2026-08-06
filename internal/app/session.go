@@ -1,77 +1,31 @@
-package main
+package app
 
 import (
 	"bufio"
 	"errors"
-	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	atrclipboard "agent-tools-runner/internal/clipboard"
+	"agent-tools-runner/internal/runner"
 )
 
-const applicationName = "Agent Tools Runner"
 const scannerInitialBufferSize = 64 * 1024
 const scannerMaximumBufferSize = 2 * 1024 * 1024
 
-func main() {
-	workspaceFlag := flag.String("workspace", ".", "project workspace directory")
-	flag.Parse()
-	workspace, err := resolveWorkspace(*workspaceFlag)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open workspace: %v\n", err)
-		os.Exit(1)
-	}
-
-	bootstrapPrompt, agentsFileFound, err := createBootstrapPrompt(workspace)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create bootstrap prompt: %v\n", err)
-		os.Exit(1)
-	}
-
-	clipboardReady, clipboardErr := initializeClipboard()
-
-	fmt.Println(applicationName)
-	fmt.Printf("Workspace: %s\n", workspace)
-	if agentsFileFound {
-		fmt.Printf("Project instructions: %s found\n", agentsFileName)
-	} else {
-		fmt.Printf("Project instructions: no %s found\n", agentsFileName)
-	}
-	fmt.Println()
-	if clipboardReady {
-		copyText(bootstrapPrompt)
-		fmt.Println("LLM bootstrap prompt copied to clipboard.")
-		fmt.Println("Paste it into your chatbot to begin.")
-	} else {
-		fmt.Printf("Clipboard is unavailable: %v\n", clipboardErr)
-		fmt.Println("Type /show-prompt to display the bootstrap prompt.")
-	}
-	fmt.Println()
-	fmt.Println("Paste a JSON request, then press Enter on an empty line to run it.")
-	fmt.Println("Type /help for commands.")
-
-	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, scannerInitialBufferSize), scannerMaximumBufferSize)
-	runSession(workspace, bootstrapPrompt, clipboardReady, scanner)
+type lineScanner interface {
+	Scan() bool
+	Text() string
+	Err() error
 }
 
-func resolveWorkspace(path string) (string, error) {
-	absolutePath, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve absolute path: %w", err)
-	}
-	fileInfo, err := os.Lstat(absolutePath)
-	if err != nil {
-		return "", fmt.Errorf("inspect workspace: %w", err)
-	}
-	if fileInfo.Mode()&os.ModeSymlink != 0 {
-		return "", errors.New("workspace must not be a symbolic link")
-	}
-	if !fileInfo.IsDir() {
-		return "", errors.New("workspace is not a directory")
-	}
-	return filepath.Clean(absolutePath), nil
+func Run(workspace string, bootstrapPrompt string, clipboardReady bool, input io.Reader) {
+	scanner := bufio.NewScanner(input)
+	scanner.Buffer(make([]byte, scannerInitialBufferSize), scannerMaximumBufferSize)
+	runSession(workspace, bootstrapPrompt, clipboardReady, scanner)
 }
 
 func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, scanner *bufio.Scanner) {
@@ -88,8 +42,7 @@ func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, s
 		}
 
 		if strings.HasPrefix(input, "/") {
-			shouldExit := handleCommand(input, workspace, bootstrapPrompt, lastResponse, clipboardReady)
-			if shouldExit {
+			if handleCommand(input, workspace, bootstrapPrompt, lastResponse, clipboardReady) {
 				return
 			}
 			continue
@@ -102,7 +55,7 @@ func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, s
 
 		requestText, cancelled, err := collectJSONRequest(input, scanner)
 		if err != nil {
-			responseText := createErrorResponse("INVALID_REQUEST", err.Error())
+			responseText := runner.CreateErrorResponse("INVALID_REQUEST", err.Error())
 			lastResponse = responseText
 			presentResponse(responseText, clipboardReady)
 			continue
@@ -112,18 +65,53 @@ func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, s
 			continue
 		}
 
-		request, err := parseAndValidateRequest(requestText)
+		request, err := runner.ParseAndValidateRequest(requestText)
 		if err != nil {
-			responseText := createErrorResponse("INVALID_REQUEST", err.Error())
+			responseText := runner.CreateErrorResponse("INVALID_REQUEST", err.Error())
 			lastResponse = responseText
 			presentResponse(responseText, clipboardReady)
 			continue
 		}
 
-		responseText := executeRequest(workspace, request)
+		responseText := runner.ExecuteRequest(workspace, request)
 		lastResponse = responseText
 		presentResponse(responseText, clipboardReady)
 	}
+}
+
+func collectJSONRequest(firstLine string, scanner lineScanner) (string, bool, error) {
+	var input strings.Builder
+	input.WriteString(firstLine)
+	for {
+		fmt.Print("... ")
+		if !scanner.Scan() {
+			if scanner.Err() != nil {
+				return "", false, fmt.Errorf("read request: %w", scanner.Err())
+			}
+			return "", false, errors.New("JSON request ended before an empty terminating line")
+		}
+
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "/cancel" {
+			return "", true, nil
+		}
+		if line == "" {
+			return input.String(), false, nil
+		}
+
+		input.WriteString("\n")
+		input.WriteString(line)
+	}
+}
+
+func isJSONRequestStart(input string) bool {
+	trimmedInput := strings.TrimSpace(input)
+	if strings.HasPrefix(trimmedInput, "{") {
+		return true
+	}
+
+	lowerInput := strings.ToLower(trimmedInput)
+	return lowerInput == "```" || lowerInput == "```json" || lowerInput == "~~~" || lowerInput == "~~~json"
 }
 
 func handleCommand(command string, workspace string, bootstrapPrompt string, lastResponse string, clipboardReady bool) bool {
@@ -133,7 +121,7 @@ func handleCommand(command string, workspace string, bootstrapPrompt string, las
 		printHelp()
 	case "/prompt":
 		if clipboardReady {
-			copyText(bootstrapPrompt)
+			atrclipboard.Copy(bootstrapPrompt)
 			fmt.Println("LLM bootstrap prompt copied to clipboard.")
 		} else {
 			fmt.Println("Clipboard is unavailable. Type /show-prompt to display the bootstrap prompt.")
@@ -144,7 +132,7 @@ func handleCommand(command string, workspace string, bootstrapPrompt string, las
 		if lastResponse == "" {
 			fmt.Println("No JSON response is available to copy.")
 		} else if clipboardReady {
-			copyText(lastResponse)
+			atrclipboard.Copy(lastResponse)
 			fmt.Println("Last JSON response copied to clipboard.")
 		} else {
 			fmt.Println("Clipboard is unavailable. Type /show to display the last JSON response.")
@@ -171,7 +159,7 @@ func handleCommand(command string, workspace string, bootstrapPrompt string, las
 func presentResponse(responseText string, clipboardReady bool) {
 	fmt.Println(responseText)
 	if clipboardReady {
-		copyText(responseText)
+		atrclipboard.Copy(responseText)
 		fmt.Println("Response copied to clipboard.")
 	} else {
 		fmt.Println("Clipboard is unavailable. Copy the JSON response shown above.")
@@ -191,4 +179,22 @@ func printHelp() {
 	fmt.Println()
 	fmt.Println("Paste a protocol version 1 JSON request, then press Enter on an empty line.")
 	fmt.Println("While entering JSON, type /cancel on its own line to discard the request.")
+}
+
+func ResolveWorkspace(path string) (string, error) {
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve absolute path: %w", err)
+	}
+	fileInfo, err := os.Lstat(absolutePath)
+	if err != nil {
+		return "", fmt.Errorf("inspect workspace: %w", err)
+	}
+	if fileInfo.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("workspace must not be a symbolic link")
+	}
+	if !fileInfo.IsDir() {
+		return "", errors.New("workspace is not a directory")
+	}
+	return filepath.Clean(absolutePath), nil
 }

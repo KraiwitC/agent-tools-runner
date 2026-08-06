@@ -1,4 +1,4 @@
-package main
+package runner
 
 import (
 	"bufio"
@@ -13,6 +13,7 @@ import (
 )
 
 const maximumSearchMatches = 100
+const scannerInitialBufferSize = 64 * 1024
 
 var defaultSearchExcludedDirectories = map[string]struct{}{
 	".git":         {},

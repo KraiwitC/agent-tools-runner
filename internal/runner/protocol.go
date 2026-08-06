@@ -1,4 +1,4 @@
-package main
+package runner
 
 import (
 	"bytes"
@@ -172,6 +172,10 @@ func removeTrailingFenceArtifact(input string) string {
 	return trimmedInput
 }
 
+func ParseAndValidateRequest(requestText string) (Request, error) {
+	return parseAndValidateRequest(requestText)
+}
+
 func parseAndValidateRequest(requestText string) (Request, error) {
 	normalizedRequest, err := normalizeJSONRequest(requestText)
 	if err != nil {
@@ -302,6 +306,10 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 	return nil
 }
 
+func ExecuteRequest(workspace string, request Request) string {
+	return executeRequest(workspace, request)
+}
+
 func executeRequest(workspace string, request Request) string {
 	response := Response{
 		Version: protocolVersion,
@@ -379,6 +387,10 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 		}
 	}
 	return result, nil
+}
+
+func CreateErrorResponse(code string, message string) string {
+	return createErrorResponse(code, message)
 }
 
 func createErrorResponse(code string, message string) string {

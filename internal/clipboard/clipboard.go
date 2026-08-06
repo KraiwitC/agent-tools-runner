@@ -1,8 +1,8 @@
-package main
+package clipboard
 
 import "golang.design/x/clipboard"
 
-func initializeClipboard() (bool, error) {
+func Initialize() (bool, error) {
 	err := clipboard.Init()
 	if err != nil {
 		return false, err
@@ -10,6 +10,6 @@ func initializeClipboard() (bool, error) {
 	return true, nil
 }
 
-func copyText(text string) {
+func Copy(text string) {
 	clipboard.Write(clipboard.FmtText, []byte(text))
 }

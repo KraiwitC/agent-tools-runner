@@ -1,4 +1,4 @@
-package main
+package prompt
 
 import (
 	"errors"
@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const agentsFileName = "AGENTS.md"
+const AgentsFileName = "AGENTS.md"
 const bootstrapInstructions = `# Agent Tools Runner Instructions
 
 ## Roles and Message Flow
@@ -265,7 +265,7 @@ The tree, search, read, edit, and create operations are available.
 
 `
 
-func createBootstrapPrompt(workspace string) (string, bool, error) {
+func Create(workspace string) (string, bool, error) {
 	repositoryInstructions, agentsFileFound, err := readRepositoryInstructions(workspace)
 	if err != nil {
 		return "", false, err
@@ -275,13 +275,13 @@ func createBootstrapPrompt(workspace string) (string, bool, error) {
 }
 
 func readRepositoryInstructions(workspace string) (string, bool, error) {
-	agentsPath := filepath.Join(workspace, agentsFileName)
+	agentsPath := filepath.Join(workspace, AgentsFileName)
 	content, err := os.ReadFile(agentsPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", false, nil
 		}
-		return "", false, fmt.Errorf("read %s: %w", agentsFileName, err)
+		return "", false, fmt.Errorf("read %s: %w", AgentsFileName, err)
 	}
 	return string(content), true, nil
 }
@@ -295,7 +295,7 @@ func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool) s
 			prompt.WriteString("\n")
 		}
 	} else {
-		prompt.WriteString("No " + agentsFileName + " file was found in the selected workspace.\n")
+		prompt.WriteString("No " + AgentsFileName + " file was found in the selected workspace.\n")
 	}
 	prompt.WriteString("\n## User Instructions\n\n")
 	return prompt.String()
