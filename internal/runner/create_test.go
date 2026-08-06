@@ -201,6 +201,9 @@ func TestExecuteRequestStopsAfterFailedCreateAndPreservesEarlierResult(t *testin
 	if response.Results[0].Data == nil || response.Results[0].Data.Path != "first.txt" || response.Results[0].Data.BytesWritten != len("first") {
 		t.Fatalf("unexpected first create result: %#v", response.Results[0].Data)
 	}
+	if response.Results[0].Data.SHA256 != calculateSHA256([]byte("first")) {
+		t.Fatalf("unexpected first create SHA-256: %q", response.Results[0].Data.SHA256)
+	}
 	if response.Error == nil || response.Error.Code != "FILE_ALREADY_EXISTS" || response.Error.ActionID != "failure" || response.Error.ActionIndex != 1 {
 		t.Fatalf("unexpected response error: %#v", response.Error)
 	}

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 const protocolVersion = "1"
 const maximumActions = 100
 const maximumEditReplacements = 100
+const sha256HexLength = 64
 
 type Request struct {
 	Version string   `json:"version"`
@@ -20,13 +22,14 @@ type Request struct {
 }
 
 type Action struct {
-	ID           string        `json:"id"`
-	Operation    string        `json:"operation"`
-	Query        string        `json:"query,omitempty"`
-	Paths        []string      `json:"paths,omitempty"`
-	Path         string        `json:"path,omitempty"`
-	Content      string        `json:"content,omitempty"`
-	Replacements []Replacement `json:"replacements,omitempty"`
+	ID             string        `json:"id"`
+	Operation      string        `json:"operation"`
+	Query          string        `json:"query,omitempty"`
+	Paths          []string      `json:"paths,omitempty"`
+	Path           string        `json:"path,omitempty"`
+	Content        string        `json:"content,omitempty"`
+	ExpectedSHA256 string        `json:"expectedSha256,omitempty"`
+	Replacements   []Replacement `json:"replacements,omitempty"`
 }
 
 type Replacement struct {
@@ -55,6 +58,11 @@ type ActionData struct {
 	Entries             []TreeEntry      `json:"entries,omitempty"`
 	Truncated           bool             `json:"truncated,omitempty"`
 	Path                string           `json:"path,omitempty"`
+	Type                string           `json:"type,omitempty"`
+	SizeBytes           int64            `json:"sizeBytes,omitempty"`
+	LineCount           int              `json:"lineCount,omitempty"`
+	SHA256              string           `json:"sha256,omitempty"`
+	Empty               *bool            `json:"empty,omitempty"`
 	ReplacementsApplied int              `json:"replacementsApplied,omitempty"`
 	BytesWritten        int              `json:"bytesWritten,omitempty"`
 }
@@ -73,6 +81,7 @@ type SearchMatch struct {
 type ReadFileResult struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	SHA256  string `json:"sha256"`
 }
 
 type ResponseError struct {
@@ -250,7 +259,7 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		if strings.TrimSpace(action.Query) == "" {
 			return fmt.Errorf("actions[%d].query is required for search", index)
 		}
-		if len(action.Paths) != 0 || action.Path != "" || action.Content != "" || len(action.Replacements) != 0 {
+		if len(action.Paths) != 0 || action.Path != "" || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for search", index)
 		}
 	case "read":
@@ -262,12 +271,15 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 				return fmt.Errorf("actions[%d].paths[%d] must not be empty", index, pathIndex)
 			}
 		}
-		if action.Query != "" || action.Path != "" || action.Content != "" || len(action.Replacements) != 0 {
+		if action.Query != "" || action.Path != "" || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for read", index)
 		}
 	case "edit":
 		if strings.TrimSpace(action.Path) == "" {
 			return fmt.Errorf("actions[%d].path is required for edit", index)
+		}
+		if !isValidSHA256(action.ExpectedSHA256) {
+			return fmt.Errorf("actions[%d].expectedSha256 must be a lowercase SHA-256 hash for edit", index)
 		}
 		if len(action.Replacements) == 0 {
 			return fmt.Errorf("actions[%d].replacements must contain at least one replacement for edit", index)
@@ -290,20 +302,35 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		if action.Content == "" {
 			return fmt.Errorf("actions[%d].content must not be empty for create", index)
 		}
-		if action.Query != "" || len(action.Paths) != 0 || len(action.Replacements) != 0 {
+		if action.Query != "" || len(action.Paths) != 0 || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for create", index)
 		}
 	case "tree":
 		if strings.TrimSpace(action.Path) == "" {
 			return fmt.Errorf("actions[%d].path is required for tree", index)
 		}
-		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || len(action.Replacements) != 0 {
+		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for tree", index)
+		}
+	case "inspect":
+		if strings.TrimSpace(action.Path) == "" {
+			return fmt.Errorf("actions[%d].path is required for inspect", index)
+		}
+		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for inspect", index)
 		}
 	default:
 		return fmt.Errorf("actions[%d].operation %q is not supported", index, action.Operation)
 	}
 	return nil
+}
+
+func isValidSHA256(value string) bool {
+	if len(value) != sha256HexLength || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func ExecuteRequest(workspace string, request Request) string {
@@ -355,9 +382,10 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 			return result, responseError
 		}
 	case "edit":
-		replacementsApplied, responseError := executeEditAction(workspace, action, actionIndex)
+		replacementsApplied, updatedSHA256, responseError := executeEditAction(workspace, action, actionIndex)
 		result.Data = &ActionData{
 			Path:                filepath.ToSlash(filepath.Clean(action.Path)),
+			SHA256:              updatedSHA256,
 			ReplacementsApplied: replacementsApplied,
 		}
 		if responseError != nil {
@@ -374,6 +402,7 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 			result.Status = "error"
 			return result, responseError
 		}
+		result.Data.SHA256 = calculateSHA256([]byte(action.Content))
 	case "tree":
 		entries, relativePath, truncated, responseError := executeTreeAction(workspace, action, actionIndex)
 		result.Data = &ActionData{
@@ -381,6 +410,13 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 			Entries:   entries,
 			Truncated: truncated,
 		}
+		if responseError != nil {
+			result.Status = "error"
+			return result, responseError
+		}
+	case "inspect":
+		inspectData, responseError := executeInspectAction(workspace, action, actionIndex)
+		result.Data = inspectData
 		if responseError != nil {
 			result.Status = "error"
 			return result, responseError

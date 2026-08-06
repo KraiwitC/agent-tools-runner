@@ -15,25 +15,34 @@ type preparedReplacement struct {
 	NewText string
 }
 
-func executeEditAction(workspace string, action Action, actionIndex int) (int, *ResponseError) {
+func executeEditAction(workspace string, action Action, actionIndex int) (int, string, *ResponseError) {
 	resolvedPath, relativePath, err := resolveWorkspaceFile(workspace, action.Path)
 	if err != nil {
-		return 0, workspaceEditResponseError(action, actionIndex, err)
+		return 0, "", workspaceEditResponseError(action, actionIndex, err)
 	}
 
 	content, fileMode, err := readEditableFile(resolvedPath, relativePath)
 	if err != nil {
-		return 0, workspaceEditResponseError(action, actionIndex, err)
+		return 0, "", workspaceEditResponseError(action, actionIndex, err)
+	}
+	if calculateSHA256([]byte(content)) != action.ExpectedSHA256 {
+		return 0, "", &ResponseError{
+			ActionID:    action.ID,
+			ActionIndex: actionIndex,
+			Code:        "FILE_CHANGED",
+			Message:     "File content does not match expectedSha256.",
+			Path:        relativePath,
+		}
 	}
 
 	preparedReplacements, responseError := prepareReplacements(content, action, actionIndex, relativePath)
 	if responseError != nil {
-		return 0, responseError
+		return 0, "", responseError
 	}
 
 	updatedContent := applyPreparedReplacements(content, preparedReplacements)
 	if err := replaceFile(resolvedPath, updatedContent, fileMode); err != nil {
-		return 0, &ResponseError{
+		return 0, "", &ResponseError{
 			ActionID:    action.ID,
 			ActionIndex: actionIndex,
 			Code:        "WRITE_FAILED",
@@ -42,7 +51,7 @@ func executeEditAction(workspace string, action Action, actionIndex int) (int, *
 		}
 	}
 
-	return len(preparedReplacements), nil
+	return len(preparedReplacements), calculateSHA256([]byte(updatedContent)), nil
 }
 
 func readEditableFile(resolvedPath string, relativePath string) (string, os.FileMode, error) {

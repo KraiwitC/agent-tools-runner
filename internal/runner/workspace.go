@@ -88,6 +88,7 @@ func readWorkspaceFile(workspace string, requestedPath string) (ReadFileResult, 
 	return ReadFileResult{
 		Path:    relativePath,
 		Content: string(content),
+		SHA256:  calculateSHA256(content),
 	}, nil
 }
 

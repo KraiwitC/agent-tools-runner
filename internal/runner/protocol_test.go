@@ -12,7 +12,7 @@ func TestParseAndValidateRequestAcceptsValidBatch(t *testing.T) {
 		"actions": [
 			{"id": "search", "operation": "search", "query": "needle"},
 			{"id": "read", "operation": "read", "paths": ["main.go"]},
-			{"id": "edit", "operation": "edit", "path": "main.go", "replacements": [{"oldText": "old", "newText": "new"}]},
+			{"id": "edit", "operation": "edit", "path": "main.go", "expectedSha256": "0000000000000000000000000000000000000000000000000000000000000000", "replacements": [{"oldText": "old", "newText": "new"}]},
 			{"id": "create", "operation": "create", "path": "created.txt", "content": "created content"},
 			{"id": "tree", "operation": "tree", "path": "."}
 		]
@@ -55,7 +55,7 @@ func TestParseAndValidateRequestRejectsCreateReplacements(t *testing.T) {
 }
 
 func TestParseAndValidateRequestRejectsEditContent(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","content":"content","replacements":[{"oldText":"old","newText":"new"}]}]}`
+	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","content":"content","expectedSha256":"0000000000000000000000000000000000000000000000000000000000000000","replacements":[{"oldText":"old","newText":"new"}]}]}`
 
 	_, err := parseAndValidateRequest(requestText)
 	if err == nil {
@@ -64,11 +64,29 @@ func TestParseAndValidateRequestRejectsEditContent(t *testing.T) {
 }
 
 func TestParseAndValidateRequestRejectsEmptyEditOldText(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","replacements":[{"oldText":"","newText":"new"}]}]}`
+	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","expectedSha256":"0000000000000000000000000000000000000000000000000000000000000000","replacements":[{"oldText":"","newText":"new"}]}]}`
 
 	_, err := parseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected empty edit oldText validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsMissingEditSHA256(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","replacements":[{"oldText":"old","newText":"new"}]}]}`
+
+	_, err := parseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected missing edit SHA-256 validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsInvalidEditSHA256(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","expectedSha256":"INVALID","replacements":[{"oldText":"old","newText":"new"}]}]}`
+
+	_, err := parseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected invalid edit SHA-256 validation error")
 	}
 }
 
@@ -97,7 +115,7 @@ func TestParseAndValidateRequestRejectsTooManyEditReplacements(t *testing.T) {
 	err := validateRequest(Request{
 		Version: protocolVersion,
 		Actions: []Action{
-			{ID: "edit", Operation: "edit", Path: "main.go", Replacements: replacements},
+			{ID: "edit", Operation: "edit", Path: "main.go", ExpectedSHA256: "0000000000000000000000000000000000000000000000000000000000000000", Replacements: replacements},
 		},
 	})
 	if err == nil {
@@ -199,7 +217,7 @@ func TestParseAndValidateRequestAcceptsTrailingBacktickArtifacts(t *testing.T) {
 }
 
 func TestParseAndValidateRequestPreservesBackticksInsideJSONStrings(t *testing.T) {
-	requestText := "{\"version\":\"1\",\"actions\":[{\"id\":\"edit\",\"operation\":\"edit\",\"path\":\"README.md\",\"replacements\":[{\"oldText\":\"Use `go test`\",\"newText\":\"Use `go test ./...`\"}]}]}"
+	requestText := "{\"version\":\"1\",\"actions\":[{\"id\":\"edit\",\"operation\":\"edit\",\"path\":\"README.md\",\"expectedSha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"replacements\":[{\"oldText\":\"Use `go test`\",\"newText\":\"Use `go test ./...`\"}]}]}"
 
 	request, err := parseAndValidateRequest(requestText)
 	if err != nil {

@@ -10,43 +10,51 @@ import (
 
 func TestExecuteEditActionReplacesUniqueText(t *testing.T) {
 	workspace := t.TempDir()
-	path := writeTestFile(t, workspace, "edit.txt", "first\nold value\nlast\n")
+	original := "first\nold value\nlast\n"
+	updated := "first\nnew value\nlast\n"
+	path := writeTestFile(t, workspace, "edit.txt", original)
 
 	action := Action{
-		ID:        "edit-file",
-		Operation: "edit",
-		Path:      "edit.txt",
+		ID:             "edit-file",
+		Operation:      "edit",
+		Path:           "edit.txt",
+		ExpectedSHA256: calculateSHA256([]byte(original)),
 		Replacements: []Replacement{
 			{OldText: "old value", NewText: "new value"},
 		},
 	}
 
-	applied, responseError := executeEditAction(workspace, action, 0)
+	applied, updatedSHA256, responseError := executeEditAction(workspace, action, 0)
 	if responseError != nil {
 		t.Fatalf("executeEditAction returned an error: %#v", responseError)
 	}
 	if applied != 1 {
 		t.Fatalf("expected one replacement, got %d", applied)
 	}
-	assertFileContent(t, path, "first\nnew value\nlast\n")
+	if updatedSHA256 != calculateSHA256([]byte(updated)) {
+		t.Fatalf("unexpected updated SHA-256: %q", updatedSHA256)
+	}
+	assertFileContent(t, path, updated)
 	assertNoTemporaryEditFiles(t, workspace)
 }
 
 func TestExecuteEditActionAppliesMultipleNonOverlappingReplacements(t *testing.T) {
 	workspace := t.TempDir()
-	path := writeTestFile(t, workspace, "edit.txt", "alpha beta gamma")
+	original := "alpha beta gamma"
+	path := writeTestFile(t, workspace, "edit.txt", original)
 
 	action := Action{
-		ID:        "edit-file",
-		Operation: "edit",
-		Path:      "edit.txt",
+		ID:             "edit-file",
+		Operation:      "edit",
+		Path:           "edit.txt",
+		ExpectedSHA256: calculateSHA256([]byte(original)),
 		Replacements: []Replacement{
 			{OldText: "alpha", NewText: "A"},
 			{OldText: "gamma", NewText: "G"},
 		},
 	}
 
-	applied, responseError := executeEditAction(workspace, action, 0)
+	applied, _, responseError := executeEditAction(workspace, action, 0)
 	if responseError != nil {
 		t.Fatalf("executeEditAction returned an error: %#v", responseError)
 	}
@@ -58,18 +66,20 @@ func TestExecuteEditActionAppliesMultipleNonOverlappingReplacements(t *testing.T
 
 func TestExecuteEditActionAllowsEmptyNewText(t *testing.T) {
 	workspace := t.TempDir()
-	path := writeTestFile(t, workspace, "edit.txt", "keep remove keep")
+	original := "keep remove keep"
+	path := writeTestFile(t, workspace, "edit.txt", original)
 
 	action := Action{
-		ID:        "edit-file",
-		Operation: "edit",
-		Path:      "edit.txt",
+		ID:             "edit-file",
+		Operation:      "edit",
+		Path:           "edit.txt",
+		ExpectedSHA256: calculateSHA256([]byte(original)),
 		Replacements: []Replacement{
 			{OldText: " remove", NewText: ""},
 		},
 	}
 
-	_, responseError := executeEditAction(workspace, action, 0)
+	_, _, responseError := executeEditAction(workspace, action, 0)
 	if responseError != nil {
 		t.Fatalf("executeEditAction returned an error: %#v", responseError)
 	}
@@ -82,15 +92,16 @@ func TestExecuteEditActionRejectsMissingTargetWithoutChangingFile(t *testing.T) 
 	path := writeTestFile(t, workspace, "edit.txt", original)
 
 	action := Action{
-		ID:        "edit-file",
-		Operation: "edit",
-		Path:      "edit.txt",
+		ID:             "edit-file",
+		Operation:      "edit",
+		Path:           "edit.txt",
+		ExpectedSHA256: calculateSHA256([]byte(original)),
 		Replacements: []Replacement{
 			{OldText: "missing", NewText: "replacement"},
 		},
 	}
 
-	_, responseError := executeEditAction(workspace, action, 0)
+	_, _, responseError := executeEditAction(workspace, action, 0)
 	assertResponseErrorCode(t, responseError, "EDIT_TARGET_NOT_FOUND")
 	assertFileContent(t, path, original)
 	assertNoTemporaryEditFiles(t, workspace)
@@ -102,15 +113,16 @@ func TestExecuteEditActionRejectsNonUniqueTargetWithoutChangingFile(t *testing.T
 	path := writeTestFile(t, workspace, "edit.txt", original)
 
 	action := Action{
-		ID:        "edit-file",
-		Operation: "edit",
-		Path:      "edit.txt",
+		ID:             "edit-file",
+		Operation:      "edit",
+		Path:           "edit.txt",
+		ExpectedSHA256: calculateSHA256([]byte(original)),
 		Replacements: []Replacement{
 			{OldText: "same", NewText: "changed"},
 		},
 	}
 
-	_, responseError := executeEditAction(workspace, action, 0)
+	_, _, responseError := executeEditAction(workspace, action, 0)
 	assertResponseErrorCode(t, responseError, "EDIT_TARGET_NOT_UNIQUE")
 	assertFileContent(t, path, original)
 }
@@ -121,16 +133,17 @@ func TestExecuteEditActionRejectsOverlappingTargetsWithoutChangingFile(t *testin
 	path := writeTestFile(t, workspace, "edit.txt", original)
 
 	action := Action{
-		ID:        "edit-file",
-		Operation: "edit",
-		Path:      "edit.txt",
+		ID:             "edit-file",
+		Operation:      "edit",
+		Path:           "edit.txt",
+		ExpectedSHA256: calculateSHA256([]byte(original)),
 		Replacements: []Replacement{
 			{OldText: "abcd", NewText: "one"},
 			{OldText: "cdef", NewText: "two"},
 		},
 	}
 
-	_, responseError := executeEditAction(workspace, action, 0)
+	_, _, responseError := executeEditAction(workspace, action, 0)
 	assertResponseErrorCode(t, responseError, "EDIT_TARGET_OVERLAP")
 	assertFileContent(t, path, original)
 }
@@ -147,15 +160,16 @@ func TestExecuteEditActionPreservesFilePermissions(t *testing.T) {
 	}
 
 	action := Action{
-		ID:        "edit-file",
-		Operation: "edit",
-		Path:      "edit.txt",
+		ID:             "edit-file",
+		Operation:      "edit",
+		Path:           "edit.txt",
+		ExpectedSHA256: calculateSHA256([]byte("old")),
 		Replacements: []Replacement{
 			{OldText: "old", NewText: "new"},
 		},
 	}
 
-	_, responseError := executeEditAction(workspace, action, 0)
+	_, _, responseError := executeEditAction(workspace, action, 0)
 	if responseError != nil {
 		t.Fatalf("executeEditAction returned an error: %#v", responseError)
 	}
@@ -167,6 +181,24 @@ func TestExecuteEditActionPreservesFilePermissions(t *testing.T) {
 	if fileInfo.Mode().Perm() != 0o640 {
 		t.Fatalf("expected permissions 0640, got %04o", fileInfo.Mode().Perm())
 	}
+}
+
+func TestExecuteEditActionRejectsChangedFile(t *testing.T) {
+	workspace := t.TempDir()
+	path := writeTestFile(t, workspace, "edit.txt", "current")
+	action := Action{
+		ID:             "edit-file",
+		Operation:      "edit",
+		Path:           "edit.txt",
+		ExpectedSHA256: calculateSHA256([]byte("stale")),
+		Replacements: []Replacement{
+			{OldText: "current", NewText: "changed"},
+		},
+	}
+
+	_, _, responseError := executeEditAction(workspace, action, 0)
+	assertResponseErrorCode(t, responseError, "FILE_CHANGED")
+	assertFileContent(t, path, "current")
 }
 
 func assertFileContent(t *testing.T, path string, expected string) {
