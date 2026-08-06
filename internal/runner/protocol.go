@@ -319,6 +319,13 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for inspect", index)
 		}
+	case "mkdir":
+		if strings.TrimSpace(action.Path) == "" {
+			return fmt.Errorf("actions[%d].path is required for mkdir", index)
+		}
+		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for mkdir", index)
+		}
 	default:
 		return fmt.Errorf("actions[%d].operation %q is not supported", index, action.Operation)
 	}
@@ -417,6 +424,16 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 	case "inspect":
 		inspectData, responseError := executeInspectAction(workspace, action, actionIndex)
 		result.Data = inspectData
+		if responseError != nil {
+			result.Status = "error"
+			return result, responseError
+		}
+	case "mkdir":
+		relativePath, responseError := executeMkdirAction(workspace, action, actionIndex)
+		result.Data = &ActionData{
+			Path: relativePath,
+			Type: "directory",
+		}
 		if responseError != nil {
 			result.Status = "error"
 			return result, responseError
