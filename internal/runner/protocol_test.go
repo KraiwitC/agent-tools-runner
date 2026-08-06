@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -24,6 +25,64 @@ func TestParseAndValidateRequestAcceptsValidBatch(t *testing.T) {
 	}
 	if len(request.Actions) != 5 {
 		t.Fatalf("expected five actions, got %d", len(request.Actions))
+	}
+}
+
+func TestParseAndValidateRequestUsesDefaultTransferLimit(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
+
+	request, err := parseAndValidateRequest(requestText)
+	if err != nil {
+		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
+	}
+	if request.MaxTransferChars != defaultMaximumTransferChars {
+		t.Fatalf("expected default maxTransferChars %d, got %d", defaultMaximumTransferChars, request.MaxTransferChars)
+	}
+}
+
+func TestParseAndValidateRequestPreservesExplicitTransferLimit(t *testing.T) {
+	requestText := `{"version":"1","maxTransferChars":64000,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
+
+	request, err := parseAndValidateRequest(requestText)
+	if err != nil {
+		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
+	}
+	if request.MaxTransferChars != 64000 {
+		t.Fatalf("expected maxTransferChars 64000, got %d", request.MaxTransferChars)
+	}
+}
+
+func TestParseAndValidateRequestRejectsTransferLimitBelowMinimum(t *testing.T) {
+	requestText := `{"version":"1","maxTransferChars":999,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
+
+	_, err := parseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected transfer-limit validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsTransferLimitAboveMaximum(t *testing.T) {
+	requestText := `{"version":"1","maxTransferChars":120001,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
+
+	_, err := parseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected transfer-limit validation error")
+	}
+}
+
+func TestParseAndValidateRequestAcceptsTransferLimitBounds(t *testing.T) {
+	for _, limit := range []int{minimumTransferChars, maximumTransferChars} {
+		t.Run(fmt.Sprintf("limit-%d", limit), func(t *testing.T) {
+			requestText := fmt.Sprintf(`{"version":"1","maxTransferChars":%d,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`, limit)
+
+			request, err := parseAndValidateRequest(requestText)
+			if err != nil {
+				t.Fatalf("parseAndValidateRequest returned an error: %v", err)
+			}
+			if request.MaxTransferChars != limit {
+				t.Fatalf("expected maxTransferChars %d, got %d", limit, request.MaxTransferChars)
+			}
+		})
 	}
 }
 
@@ -135,6 +194,54 @@ func TestParseAndValidateRequestRejectsDuplicateActionIDs(t *testing.T) {
 	_, err := parseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected duplicate action ID validation error")
+	}
+}
+
+func TestExecuteRequestRejectsOversizedActionResult(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "large.txt", strings.Repeat("a", 2000))
+	request := Request{
+		Version:          protocolVersion,
+		MaxTransferChars: minimumTransferChars,
+		Actions: []Action{
+			{ID: "read-large", Operation: "read", Paths: []string{"large.txt"}},
+		},
+	}
+
+	responseText := executeRequest(workspace, request)
+	if len(responseText) > minimumTransferChars {
+		t.Fatalf("expected response within %d characters, got %d", minimumTransferChars, len(responseText))
+	}
+	var response Response
+	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Status != "error" || response.Error == nil || response.Error.Code != "TRANSFER_LIMIT_EXCEEDED" {
+		t.Fatalf("unexpected transfer-limit response: %#v", response)
+	}
+	if len(response.Results) != 1 || response.Results[0].Status != "error" || response.Results[0].Data != nil {
+		t.Fatalf("unexpected transfer-limit action result: %#v", response.Results)
+	}
+}
+
+func TestExecuteRequestPreservesResultWithinTransferLimit(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "small.txt", "content")
+	request := Request{
+		Version:          protocolVersion,
+		MaxTransferChars: minimumTransferChars,
+		Actions: []Action{
+			{ID: "read-small", Operation: "read", Paths: []string{"small.txt"}},
+		},
+	}
+
+	responseText := executeRequest(workspace, request)
+	var response Response
+	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Status != "success" || len(response.Results) != 1 || response.Results[0].Data == nil {
+		t.Fatalf("unexpected successful response: %#v", response)
 	}
 }
 

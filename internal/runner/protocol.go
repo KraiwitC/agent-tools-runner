@@ -14,11 +14,16 @@ import (
 const protocolVersion = "1"
 const maximumActions = 100
 const maximumEditReplacements = 100
+const maximumReadRangeLines = 1000
+const defaultMaximumTransferChars = 100000
+const maximumTransferChars = 120000
+const minimumTransferChars = 1000
 const sha256HexLength = 64
 
 type Request struct {
-	Version string   `json:"version"`
-	Actions []Action `json:"actions"`
+	Version          string   `json:"version"`
+	MaxTransferChars int      `json:"maxTransferChars,omitempty"`
+	Actions          []Action `json:"actions"`
 }
 
 type Action struct {
@@ -28,6 +33,8 @@ type Action struct {
 	Paths          []string      `json:"paths,omitempty"`
 	Path           string        `json:"path,omitempty"`
 	Content        string        `json:"content,omitempty"`
+	StartLine      int           `json:"startLine,omitempty"`
+	EndLine        int           `json:"endLine,omitempty"`
 	ExpectedSHA256 string        `json:"expectedSha256,omitempty"`
 	Replacements   []Replacement `json:"replacements,omitempty"`
 }
@@ -59,6 +66,10 @@ type ActionData struct {
 	Truncated           bool             `json:"truncated,omitempty"`
 	Path                string           `json:"path,omitempty"`
 	Type                string           `json:"type,omitempty"`
+	Content             string           `json:"content,omitempty"`
+	StartLine           int              `json:"startLine,omitempty"`
+	EndLine             int              `json:"endLine,omitempty"`
+	TotalLines          int              `json:"totalLines,omitempty"`
 	SizeBytes           int64            `json:"sizeBytes,omitempty"`
 	LineCount           int              `json:"lineCount,omitempty"`
 	SHA256              string           `json:"sha256,omitempty"`
@@ -197,6 +208,7 @@ func parseAndValidateRequest(requestText string) (Request, error) {
 	if err := validateRequest(request); err != nil {
 		return Request{}, err
 	}
+	request.MaxTransferChars = effectiveMaximumTransferChars(request.MaxTransferChars)
 	return request, nil
 }
 
@@ -229,6 +241,9 @@ func validateRequest(request Request) error {
 	if request.Version != protocolVersion {
 		return fmt.Errorf("version must be %q", protocolVersion)
 	}
+	if request.MaxTransferChars != 0 && (request.MaxTransferChars < minimumTransferChars || request.MaxTransferChars > maximumTransferChars) {
+		return fmt.Errorf("maxTransferChars must be between %d and %d", minimumTransferChars, maximumTransferChars)
+	}
 	if len(request.Actions) == 0 {
 		return errors.New("actions must contain at least one action")
 	}
@@ -254,6 +269,10 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 	}
 	actionIDs[action.ID] = struct{}{}
 
+	if action.Operation != "read_range" && (action.StartLine != 0 || action.EndLine != 0) {
+		return fmt.Errorf("actions[%d] contains range fields that are only supported for read_range", index)
+	}
+
 	switch action.Operation {
 	case "search":
 		if strings.TrimSpace(action.Query) == "" {
@@ -273,6 +292,22 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		}
 		if action.Query != "" || action.Path != "" || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for read", index)
+		}
+	case "read_range":
+		if strings.TrimSpace(action.Path) == "" {
+			return fmt.Errorf("actions[%d].path is required for read_range", index)
+		}
+		if action.StartLine < 1 {
+			return fmt.Errorf("actions[%d].startLine must be at least 1 for read_range", index)
+		}
+		if action.EndLine < action.StartLine {
+			return fmt.Errorf("actions[%d].endLine must be greater than or equal to startLine for read_range", index)
+		}
+		if action.EndLine-action.StartLine+1 > maximumReadRangeLines {
+			return fmt.Errorf("actions[%d] read_range must not request more than %d lines", index, maximumReadRangeLines)
+		}
+		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for read_range", index)
 		}
 	case "edit":
 		if strings.TrimSpace(action.Path) == "" {
@@ -342,6 +377,13 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 	return nil
 }
 
+func effectiveMaximumTransferChars(value int) int {
+	if value == 0 {
+		return defaultMaximumTransferChars
+	}
+	return value
+}
+
 func isValidSHA256(value string) bool {
 	if len(value) != sha256HexLength || value != strings.ToLower(value) {
 		return false
@@ -360,6 +402,7 @@ func executeRequest(workspace string, request Request) string {
 		Status:  "success",
 		Results: make([]ActionResult, 0, len(request.Actions)),
 	}
+	maxTransferChars := effectiveMaximumTransferChars(request.MaxTransferChars)
 	for actionIndex, action := range request.Actions {
 		result, responseError := executeAction(workspace, action, actionIndex)
 		response.Results = append(response.Results, result)
@@ -368,6 +411,38 @@ func executeRequest(workspace string, request Request) string {
 			response.Error = responseError
 			break
 		}
+		if len(marshalResponse(response)) > maxTransferChars {
+			response.Results[len(response.Results)-1] = ActionResult{
+				ID:        action.ID,
+				Operation: action.Operation,
+				Status:    "error",
+			}
+			response.Status = "error"
+			response.Error = &ResponseError{
+				ActionID:    action.ID,
+				ActionIndex: actionIndex,
+				Code:        "TRANSFER_LIMIT_EXCEEDED",
+				Message:     "The action result exceeds maxTransferChars. Request less content or use a smaller range.",
+			}
+			break
+		}
+	}
+	responseText := marshalResponse(response)
+	if len(responseText) <= maxTransferChars {
+		return responseText
+	}
+	return createTransferLimitErrorResponse(maxTransferChars)
+}
+
+func createTransferLimitErrorResponse(maxTransferChars int) string {
+	response := Response{
+		Version: protocolVersion,
+		Status:  "error",
+		Results: []ActionResult{},
+		Error: &ResponseError{
+			Code:    "TRANSFER_LIMIT_EXCEEDED",
+			Message: fmt.Sprintf("The response exceeds the %d character transfer limit.", maxTransferChars),
+		},
 	}
 	return marshalResponse(response)
 }
@@ -394,6 +469,13 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 	case "read":
 		files, responseError := executeReadAction(workspace, action, actionIndex)
 		result.Data = &ActionData{Files: files}
+		if responseError != nil {
+			result.Status = "error"
+			return result, responseError
+		}
+	case "read_range":
+		readRangeData, responseError := executeReadRangeAction(workspace, action, actionIndex)
+		result.Data = readRangeData
 		if responseError != nil {
 			result.Status = "error"
 			return result, responseError
