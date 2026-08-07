@@ -157,13 +157,20 @@ func handleCommand(command string, workspace string, bootstrapPrompt string, las
 }
 
 func presentResponse(responseText string, clipboardReady bool) {
-	fmt.Println(responseText)
+	summary, err := summarizeResponse(responseText)
+	if err != nil {
+		fmt.Println("Could not summarize the response. Type /show to view the complete JSON response.")
+	} else {
+		fmt.Println(summary)
+	}
+	fmt.Println()
 	if clipboardReady {
 		atrclipboard.Copy(responseText)
-		fmt.Println("Response copied to clipboard.")
+		fmt.Println("JSON response copied to clipboard.")
 	} else {
-		fmt.Println("Clipboard is unavailable. Copy the JSON response shown above.")
+		fmt.Println("Clipboard is unavailable. Type /show to view the complete JSON response.")
 	}
+	fmt.Println()
 }
 
 func printHelp() {
