@@ -2,6 +2,8 @@ package runner
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -125,6 +127,28 @@ func readTextFile(path string, relativePath string, openMessage string, readMess
 		return nil, newWorkspaceError("UNSUPPORTED_FILE", "File is not supported UTF-8 text.", relativePath, nil)
 	}
 	return content, nil
+}
+
+func calculateSHA256(content []byte) string {
+	hash := sha256.Sum256(content)
+	return hex.EncodeToString(hash[:])
+}
+
+func isDirectoryEmpty(path string) (bool, error) {
+	directory, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer directory.Close()
+
+	_, err = directory.Readdirnames(1)
+	if errors.Is(err, io.EOF) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func rejectSymlinkParents(workspace string, relativePath string) error {

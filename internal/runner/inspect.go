@@ -2,10 +2,7 @@ package runner
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,11 +88,6 @@ func resolveWorkspaceInspectPath(workspace string, requestedPath string) (string
 	return resolvedPath, relativePath, fileInfo, nil
 }
 
-func calculateSHA256(content []byte) string {
-	hash := sha256.Sum256(content)
-	return hex.EncodeToString(hash[:])
-}
-
 func countFileLines(content []byte) int {
 	if len(content) == 0 {
 		return 0
@@ -105,21 +97,4 @@ func countFileLines(content []byte) int {
 		lineCount++
 	}
 	return lineCount
-}
-
-func isDirectoryEmpty(path string) (bool, error) {
-	directory, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer directory.Close()
-
-	_, err = directory.Readdirnames(1)
-	if errors.Is(err, io.EOF) {
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return false, nil
 }
