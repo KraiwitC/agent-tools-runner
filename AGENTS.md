@@ -10,13 +10,13 @@ The initial use case is an enterprise environment where an LLM chatbot cannot di
 
 ## Current Status
 
-Agent Tools Runner version 0.3.0 is under implementation.
+Agent Tools Runner version 0.3.0 implements the current protocol version 1 feature set.
 
 The implementation language is Go. The application is an interactive local command-line program.
 
 Keep the codebase small enough that it can be read and understood by one developer who is learning Go.
 
-## Initial Interaction Model
+## Interaction Model
 
 Version 1 uses an interactive terminal session and manual copy and paste:
 
@@ -51,27 +51,11 @@ Direct integration with an LLM provider is not required for Version 1.
 ## Version 1 User Workflow
 
 1. The user starts `atr` from the target project directory or supplies `--workspace <path>`.
-2. Agent Tools Runner loads the workspace's `AGENTS.md` when present.
-3. Agent Tools Runner generates an LLM bootstrap prompt containing the ATR workflow, supported operations, request format, error behavior, editing rules, and repository instructions.
-4. Agent Tools Runner copies the bootstrap prompt to the system clipboard.
-5. The user pastes the bootstrap prompt into an LLM chatbot.
-6. The user describes a software-development requirement to the LLM chatbot.
-7. The LLM restates the requirement and lists its assumptions.
-8. The LLM asks clarifying questions when the requirement is ambiguous.
-9. The LLM proposes a short investigation and implementation plan.
-10. The user approves or adjusts the plan.
-11. The LLM creates a structured request for Agent Tools Runner.
-12. One request may contain multiple related read-only actions, such as searching code and reading several files.
-13. The user pastes the request into the interactive ATR session.
-14. Agent Tools Runner validates and executes the requested actions in order.
-15. Agent Tools Runner displays a short human-readable summary and copies the complete JSON response to the clipboard.
-16. The user pastes the response into the LLM chatbot.
-17. The LLM uses the actual project contents to prepare one or more exact targeted edits.
-18. The user pastes the edit request into Agent Tools Runner. Submitting the request authorizes those edits to be applied.
-19. Agent Tools Runner validates all edits before writing.
-20. Agent Tools Runner applies the edits only when every required validation succeeds.
-21. Agent Tools Runner copies the structured result to the clipboard.
-22. The user reviews the resulting changes with the editor's normal source-control or file-comparison tools, such as the VS Code Source Control view.
+2. ATR loads the workspace's `AGENTS.md` when present, prepares the bootstrap prompt, and copies it to the clipboard.
+3. The user describes a requirement, and the LLM investigates the repository, proposes a plan, and waits for approval.
+4. The user transfers approved JSON requests to ATR and returns structured responses to the LLM.
+5. ATR validates and executes actions in order. Pasting a modifying request authorizes that exact request.
+6. The user reviews resulting changes with the editor's source-control or file-comparison tools.
 
 ## Version 0.3.0 Scope
 
@@ -98,72 +82,32 @@ A single request may mix supported operations. The normal workflow uses an inves
 The complete request must pass structural validation before the first action executes. Runtime action failures preserve earlier successful results, include the failed action result, and stop before later actions execute. Batches are ordered but are not transactions. An earlier successful create or edit is not rolled back when a later action fails.
 
 
-## Version 1 Interactive CLI
+## Interactive CLI
 
-The installed executable name is `atr`.
+The executable is `atr`, and the current directory is the default workspace. The session accepts slash commands or a JSON request beginning with `{` or a supported JSON code fence. ATR collects request lines until an empty line and then validates the complete request once. `/cancel` on its own line discards a request during collection. Other ordinary input is ignored without replacing the last response.
 
-Starting `atr` opens an interactive terminal session for the selected workspace. The current directory is the default workspace.
-
-The session accepts either:
-
-- a slash command beginning with `/`; or
-- a JSON request beginning with `{`.
-
-For a JSON request, Agent Tools Runner enters collection mode and accepts every pasted line until the user enters an empty line. It then validates the complete block exactly once. While collecting JSON, `/cancel` on its own line discards the current request.
-
-Ordinary non-command input that does not begin with `{` is ignored with a short terminal message. It must not create a structured error response or replace the clipboard contents.
-
-The minimum Version 1 slash commands are:
+Supported commands:
 
 - `/help`: Show available commands.
-- `/prompt`: Regenerate and copy the LLM bootstrap prompt.
-- `/show-prompt`: Print the bootstrap prompt as plain text.
-- `/copy`: Copy the last complete JSON response again.
-- `/show`: Print the last complete JSON response as plain JSON.
+- `/prompt`: Copy the bootstrap prompt.
+- `/show-prompt`: Print the bootstrap prompt.
+- `/copy`: Copy the last JSON response.
+- `/show`: Print the last JSON response.
 - `/workspace`: Show the selected workspace.
 - `/clear`: Clear the terminal without deleting the last response.
-- `/exit`: End the session cleanly.
+- `/exit`: End the session.
 
-During JSON collection, `/cancel` discards the current request and returns to the normal prompt.
-
-The terminal should display short human-readable summaries. The clipboard should contain the complete machine-readable prompt or JSON response without ANSI escape codes.
-
-The session keeps only the current workspace, current bootstrap prompt, and last JSON response in memory. Persistent session storage is not required in Version 1.
+The session keeps the workspace, bootstrap prompt, and last JSON response in memory only.
 
 ## LLM Bootstrap Prompt
 
-Agent Tools Runner must prepare the LLM before the first tool request.
+At startup, ATR generates and copies a provider-neutral bootstrap prompt describing the planning and approval workflow, supported operations, request and response formats, safety rules, exact editing requirements, and repository instructions. The LLM must use actual ATR results and must not claim success before ATR reports it.
 
-At startup, it should generate and copy a bootstrap prompt that explains:
-
-- the separate responsibilities of the LLM and Agent Tools Runner;
-- the requirement-restatement, clarification, planning, and approval workflow;
-- the supported `tree`, `search`, `read`, `read_range`, `inspect`, `edit`, `create`, `mkdir`, and `delete` operations;
-- the exact JSON request format and batching rules;
-- the structured response and error behavior;
-- that edits use exact existing text and exact replacement text;
-- that edit targets must be unique and include enough context to avoid ambiguity;
-- that unrelated code and formatting must not be changed;
-- that placeholders or ellipses must not be used inside edit text;
-- that the LLM must not claim success until Agent Tools Runner returns success;
-- that the user manually transfers requests and responses;
-- the target repository's `AGENTS.md` contents when the file exists.
-
-The bootstrap prompt must remain LLM-provider-neutral and must not include internal implementation details, future roadmap items, or Agent Tools Runner's own Go development history.
-
-If the workspace has no `AGENTS.md`, prompt generation still succeeds and clearly states that no repository-specific instructions were found.
+When the selected workspace contains `AGENTS.md`, its contents are included. If it is absent, prompt generation still succeeds and states that no repository-specific instructions were found. ATR does not reload repository instructions during a session; restart ATR after changing `AGENTS.md`.
 
 ## Clipboard Behavior
 
-Clipboard support is a core Version 1 usability feature.
-
-Agent Tools Runner will use one small cross-platform Go clipboard library rather than operating-system shell commands. The library must support Windows and macOS, plain UTF-8 text, and an acceptable open-source license. Prefer a library that does not require CGO or external commands when practical.
-
-At startup, Agent Tools Runner automatically copies the bootstrap prompt.
-
-After every request, including failed requests, Agent Tools Runner automatically copies the complete structured JSON response.
-
-A clipboard-copy failure does not change the success or failure of the underlying tool actions. The terminal must report the clipboard problem separately, retain the prompt or response in memory, and allow the user to retry with `/prompt` or `/copy` or print it with `/show-prompt` or `/show`.
+ATR uses `golang.design/x/clipboard` for plain-text clipboard access without shell commands. Successful initialization enables automatic copying of the bootstrap prompt and every structured response, including error responses. When clipboard initialization is unavailable, the prompt or response remains available through `/show-prompt` or `/show`.
 
 ## Confirmed Version 1 Requirements
 
@@ -341,7 +285,6 @@ An error result should contain at least:
 Stable error codes include:
 
 - `INVALID_REQUEST`
-- `UNKNOWN_OPERATION`
 - `PATH_OUTSIDE_WORKSPACE`
 - `SYMLINK_NOT_SUPPORTED`
 - `FILE_NOT_FOUND`
@@ -355,7 +298,12 @@ Stable error codes include:
 - `EDIT_TARGET_NOT_FOUND`
 - `EDIT_TARGET_NOT_UNIQUE`
 - `EDIT_TARGET_OVERLAP`
+- `FILE_CHANGED`
+- `RANGE_OUT_OF_BOUNDS`
+- `DIRECTORY_NOT_EMPTY`
 - `WRITE_FAILED`
+- `DELETE_FAILED`
+- `TRANSFER_LIMIT_EXCEEDED`
 - `INTERNAL_ERROR`
 
 Create errors use `FILE_ALREADY_EXISTS` when the target already exists, `PARENT_DIRECTORY_NOT_FOUND` when a required parent is missing, and `WRITE_FAILED` when safe creation cannot be completed. Error responses include the action ID, zero-based action index, safe message, and workspace-relative path when applicable.
@@ -385,59 +333,26 @@ These rules must be enforced by the Go program rather than relying only on instr
 17. Do not expose secrets, stack traces, or unnecessary absolute paths in responses.
 18. Do not log complete source-file contents by default.
 
-## Deliberately Excluded from Version 1
+## Deferred Features
 
-The following features are moved out of Version 1 to keep the codebase small and understandable:
+The following features are outside Version 1 and require a demonstrated use case and explicit approval before implementation:
 
-- runtime-enforced session tracking beyond required content hashes;
-- complete-file replacement;
-- built-in diff generation;
-- interactive diff approval;
-- persistent workflow state;
-- workflow identifiers and expiration;
-- request deduplication;
-- Git status or Git diff execution;
-- test or build execution;
+- Git operations;
+- approved test or build command execution;
 - arbitrary shell execution;
-- structured audit files;
-- concurrency and parallel action execution;
-- advanced secret detection;
-- encoding detection and conversion;
-- binary file processing;
+- runtime session tracking beyond content hashes;
+- persistent workflow state and request deduplication;
+- built-in diff generation and interactive approval;
 - editing multiple files atomically;
-- generic plugin or tool registry architecture.
-
-## Phase 2 Candidates
-
-Phase 2 may add features that improve the developer workflow after Version 1 is working and understood:
-
-- Git status and Git diff operations;
-- approved test and build command profiles;
-- command timeouts and output capture;
-- runtime-enforced session tracking beyond required content hashes;
-- built-in change preview and approval;
-- persistent workflow state;
-- editing multiple files in one request;
-- better search filters and exclusions;
-- structured audit logging;
-- improved sensitive-file warnings.
-
-Phase 2 requirements must be discussed before implementation. Inclusion in this list is not automatic approval to build the feature.
-
-## Later Features
-
-The following features remain outside the near-term scope:
-
-- SQL queries and database connectivity;
-- database writes;
-- Git commit, push, reset, or history rewriting;
+- configurable search filters and exclusions;
+- structured audit logging and improved sensitive-file warnings;
+- encoding conversion and binary-file processing;
 - recursive directory deletion;
-- direct integration with a specific LLM provider;
-- MCP or local HTTP integration;
-- graphical user interface;
-- background autonomous execution;
-- plugin systems;
-- multi-agent orchestration.
+- database connectivity and writes;
+- direct LLM-provider, MCP, or local HTTP integration;
+- graphical interfaces, background autonomous execution, concurrency, plugins, and multi-agent orchestration.
+
+Deferred items are not automatically approved for implementation.
 
 ## Development Workflow
 
@@ -504,28 +419,11 @@ The Go implementation must remain small, direct, and idiomatic.
 
 ## Testing Expectations
 
-Tests are colocated with their focused packages, use the same package name when private helpers require direct testing, use `t.TempDir`, and must not modify the real repository.
+Keep tests beside their focused packages. Use the same package name when direct testing of private helpers is useful, use `t.TempDir`, and never modify the real repository.
 
-Version 0.3.0 tests focus on behavior most likely to damage a project or produce misleading results:
+Prioritize tests for workspace boundaries, symbolic links, file limits, exact edits, stale hashes, no-overwrite creation, safe deletion, ordered batch failures, structured errors, and cleanup after failed writes.
 
-1. paths outside the workspace are rejected;
-2. symbolic links are rejected;
-3. multiple files can be read in one request;
-4. unsupported and oversized files return errors;
-5. edit targets must be exact, unique, non-overlapping, and non-empty;
-6. all replacements are validated before writing;
-7. failed edits leave the file unchanged;
-8. create writes complete UTF-8 content exactly and reports the normalized path and byte count;
-9. create rejects existing targets without changing them;
-10. create rejects missing parents, unsafe paths, symbolic links, invalid UTF-8, null bytes, and oversized content;
-11. successful and failed creates leave no `.atr-create-*` temporary files;
-12. tree returns deterministic forward-slash paths, honors exclusions, skips symbolic links, and reports truncation;
-13. failed actions preserve earlier results and prevent later actions from running;
-14. tool failures produce structured error results;
-15. error responses do not expose stack traces or unnecessary absolute paths;
-16. existing search, read, edit, and protocol behavior remains compatible.
-
-Before version 0.3.0 is declared complete, run:
+Run before committing:
 
 ```text
 go fmt ./...
@@ -533,7 +431,7 @@ go test ./...
 go vet ./...
 ```
 
-## Confirmed Project Decisions
+## Architecture and Project Decisions
 
 - Project name: Agent Tools Runner
 - Repository name: `agent-tools-runner`
@@ -568,46 +466,29 @@ go vet ./...
 - SQL support: Deferred
 - Arbitrary shell execution: Not supported
 
-## Version 0.3.0 Implementation Decisions
+### Implementation Boundaries
 
-- Clipboard dependency: `golang.design/x/clipboard`, kept behind focused clipboard functions.
-- Go module version: Go 1.26.5.
-- JSON protocol version: `1`.
-- Maximum file size: 1 MiB.
-- Maximum search matches: 100.
-- Maximum tree entries: 500.
-- Maximum actions per request: 100.
-- Maximum replacements per edit action: 100.
-- Built-in traversal exclusions: `.git`, `.idea`, `node_modules`, `target`, `build`, `dist`, and `vendor`.
-- `.vscode` remains visible to search and tree operations.
-- The executable entry point is `cmd/atr/main.go`.
-- `internal/app` owns interactive session orchestration and workspace startup validation.
-- `internal/clipboard` isolates the clipboard dependency.
+- Clipboard dependency: `golang.design/x/clipboard`, isolated by `internal/clipboard`.
+- Go module version: Go 1.26.5; JSON protocol version: `1`.
+- `cmd/atr` contains the executable entry point.
+- `internal/app` owns session orchestration and workspace startup validation.
 - `internal/prompt` owns bootstrap-prompt generation and repository-instruction loading.
-- `internal/runner` owns protocol validation, response construction, and focused filesystem operations.
+- `internal/runner` owns protocol validation, response construction, and filesystem operations.
+- Maximum file size: 1 MiB; maximum search matches: 100; maximum tree entries: 500.
+- Response transfer limit: 100,000 characters by default and 120,000 maximum.
+- Maximum `read_range` size: 1,000 lines.
+- Traversal excludes `.git`, `.idea`, `node_modules`, `target`, `build`, `dist`, and `vendor`; `.vscode` remains visible.
 - Complete-file SHA-256 hashes protect edits and regular-file deletion from stale content.
-- Default response transfer limit: 100,000 characters.
-- Maximum response transfer limit: 120,000 characters.
-- Maximum lines per `read_range` action: 1,000.
-- Directory creation requires an existing parent directory.
-- Directory deletion supports empty directories only; recursive deletion is not supported.
+- Directory creation requires an existing parent; directory deletion supports empty directories only.
 
-Future decisions must be based on a demonstrated use case and must not introduce speculative architecture.
+Future decisions require a demonstrated use case and must not introduce speculative architecture.
 
 ## Repository-Specific Knowledge
 
-When Agent Tools Runner is used with another repository, the LLM should inspect that repository's `AGENTS.md` when one exists.
+Repository instructions guide LLM planning and code generation but never replace ATR's runtime safety checks.
 
-Repository instructions guide the LLM's planning and code generation. They do not replace the runtime's safety checks.
+Record only durable, verified knowledge such as coding conventions, architecture boundaries, validation rules, build commands, and recurring workflow requirements. Do not record temporary task details, duplicate guidance, unverified assumptions, secrets, credentials, customer data, or production values.
 
-Durable repository knowledge may include coding conventions, architecture boundaries, build or test commands, logging conventions, validation rules, transaction rules, file-layout rules, recurring workflow requirements, and important constraints future tasks must follow.
+Read and preserve the organization of an existing `AGENTS.md`, changing only the relevant section. Do not create one automatically when it is absent; propose it during planning and obtain approval first.
 
-Do not add temporary task details, one-time implementation notes, status updates, duplicate guidance, unverified guesses, secrets, credentials, tokens, customer data, production values, or other sensitive information to `AGENTS.md`.
-
-When `AGENTS.md` exists, read it first and use a targeted edit that preserves its organization and terminology. Avoid duplication and change only the section affected by verified durable knowledge.
-
-When `AGENTS.md` does not exist, do not create it automatically merely because it is missing. If the current task reveals useful durable repository instructions, propose a concise file during planning, explain why it is useful, and wait for user approval unless its creation was already explicitly approved. Use `create` only after approval and include only verified repository-specific instructions.
-
-After a target repository's `AGENTS.md` is created or changed, the current ATR session still contains the old in-memory bootstrap prompt. Exit and restart ATR, start a new LLM conversation, and paste the newly generated bootstrap prompt. Automatic `AGENTS.md` reloading is outside version 0.3.0.
-
-Language-specific and project-specific conventions belong in the target repository's own `AGENTS.md`. They are not general rules for Agent Tools Runner.
+After creating or changing a target repository's `AGENTS.md`, restart ATR and begin a new LLM conversation with the regenerated bootstrap prompt. ATR does not reload repository instructions during an active session.
