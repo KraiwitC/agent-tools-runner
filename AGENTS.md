@@ -10,7 +10,7 @@ The initial use case is an enterprise environment where an LLM chatbot cannot di
 
 ## Current Status
 
-Agent Tools Runner version 0.2.0 is under implementation.
+Agent Tools Runner version 0.3.0 is under implementation.
 
 The implementation language is Go. The application is an interactive local command-line program.
 
@@ -73,19 +73,25 @@ Direct integration with an LLM provider is not required for Version 1.
 21. Agent Tools Runner copies the structured result to the clipboard.
 22. The user reviews the resulting changes with the editor's normal source-control or file-comparison tools, such as the VS Code Source Control view.
 
-## Version 0.2.0 Scope
+## Version 0.3.0 Scope
 
-Version 0.2.0 supports these operations while retaining protocol version `1`:
+Version 0.3.0 supports these operations while retaining protocol version `1`:
 
 - `tree`: Read a bounded project-directory tree without returning file contents.
 - `search`: Search text files inside the selected workspace for a text value.
-- `read`: Read one or more complete text files in a single request.
-- `edit`: Apply one or more exact text replacements to one existing text file.
-- `create`: Create one approved new UTF-8 text file without overwriting an existing path.
+- `read`: Read one or more complete text files and return a complete-file SHA-256 hash.
+- `read_range`: Read an inclusive one-based line range and return the complete-file SHA-256 hash.
+- `inspect`: Return file metadata and SHA-256, or report whether a directory is empty.
+- `edit`: Apply exact replacements when `expectedSha256` matches the current file.
+- `create`: Create one approved new UTF-8 text file without overwriting an existing path and return its SHA-256 hash.
+- `mkdir`: Create one directory whose parent already exists.
+- `delete`: Delete a hash-matched regular file or an empty directory.
 
-A request uses protocol version `1` because `tree` and `create` are backward-compatible additions. Existing `search`, `read`, and `edit` requests continue to use the same request shapes.
+A request uses protocol version `1`. Existing compatible request shapes remain valid, except that `edit` now requires `expectedSha256` for stale-file protection.
 
 A request contains a non-empty ordered `actions` array. Every action has a unique `id` and an `operation`. A request may contain at most 100 actions, and one edit action may contain at most 100 replacements.
+
+The optional request-level `maxTransferChars` must be between 1,000 and 120,000 characters. Its default is 100,000. The limit applies to the complete serialized JSON response. One `read_range` action may request at most 1,000 lines.
 
 A single request may mix supported operations. The normal workflow uses an investigation request followed by one or more later edit or create requests after the LLM receives actual repository contents.
 
@@ -132,7 +138,7 @@ At startup, it should generate and copy a bootstrap prompt that explains:
 
 - the separate responsibilities of the LLM and Agent Tools Runner;
 - the requirement-restatement, clarification, planning, and approval workflow;
-- the supported `tree`, `search`, `read`, `edit`, and `create` operations;
+- the supported `tree`, `search`, `read`, `read_range`, `inspect`, `edit`, `create`, `mkdir`, and `delete` operations;
 - the exact JSON request format and batching rules;
 - the structured response and error behavior;
 - that edits use exact existing text and exact replacement text;
@@ -194,7 +200,7 @@ Version 1 does not need optional actions or continue-on-error behavior unless a 
 
 ### Project tree
 
-Version 0.2.0 provides a basic recursive `tree` operation for inspecting repository structure without reading file contents.
+Version 0.3.0 provides a basic recursive `tree` operation for inspecting repository structure without reading file contents.
 
 A tree request contains one required workspace-relative directory path. Use `.` for the workspace root.
 
@@ -226,7 +232,7 @@ A failed file read must return a structured error. It must not return invented, 
 
 ### Safe file creation
 
-Version 0.2.0 adds a separate `create` operation. Create must never be simulated through an edit with an empty or invented `oldText`.
+Version 0.3.0 includes a separate `create` operation. Create must never be simulated through an edit with an empty or invented `oldText`.
 
 A create request has this action shape:
 
@@ -255,7 +261,7 @@ Create does not make parent directories and never overwrites or modifies an exis
 
 The implementation first writes and flushes the complete content to a temporary file in the target directory. It then claims the final target with exclusive creation so that a competing file cannot be silently overwritten. The target is removed if final writing, flushing, or closing fails. Temporary files are removed after success and failure.
 
-The Go standard library does not provide one simple cross-platform primitive that both performs a no-overwrite rename and guarantees atomic final-file visibility. Version 0.2.0 prioritizes the mandatory no-overwrite guarantee by using exclusive final-target creation. Another process could briefly observe the newly created target while its prepared content is copied into it.
+The Go standard library does not provide one simple cross-platform primitive that both performs a no-overwrite rename and guarantees atomic final-file visibility. Version 0.3.0 continues to prioritize the mandatory no-overwrite guarantee by using exclusive final-target creation. Another process could briefly observe the newly created target while its prepared content is copied into it.
 
 ### Create and edit distinction
 
@@ -370,19 +376,20 @@ These rules must be enforced by the Go program rather than relying only on instr
 8. Require create content to be non-empty supported UTF-8 text within the 1 MiB limit.
 9. Require create parent directories to exist and reject symbolic links in the parent path.
 10. Use exclusive final-target creation to prevent a create race from overwriting another file.
-11. Never delete a user file. Removing an incomplete target created by the current failed create action is required cleanup, not a delete operation exposed to the LLM.
-12. Never execute shell commands.
-13. Treat all LLM requests and repository contents as untrusted input.
-14. Return structured errors for failed operations.
-15. Do not expose secrets, stack traces, or unnecessary absolute paths in responses.
-16. Do not log complete source-file contents by default.
+11. Require `expectedSha256` to match before deleting a regular file.
+12. Delete directories only when they are empty, and never delete the workspace root.
+13. Never perform recursive deletion.
+14. Never execute shell commands.
+15. Treat all LLM requests and repository contents as untrusted input.
+16. Return structured errors for failed operations.
+17. Do not expose secrets, stack traces, or unnecessary absolute paths in responses.
+18. Do not log complete source-file contents by default.
 
 ## Deliberately Excluded from Version 1
 
 The following features are moved out of Version 1 to keep the codebase small and understandable:
 
-- runtime-enforced read-before-write tracking;
-- file hashes and stale-file detection;
+- runtime-enforced session tracking beyond required content hashes;
 - complete-file replacement;
 - built-in diff generation;
 - interactive diff approval;
@@ -407,8 +414,7 @@ Phase 2 may add features that improve the developer workflow after Version 1 is 
 - Git status and Git diff operations;
 - approved test and build command profiles;
 - command timeouts and output capture;
-- runtime-enforced read-before-write tracking;
-- file hashes and stale-file detection;
+- runtime-enforced session tracking beyond required content hashes;
 - built-in change preview and approval;
 - persistent workflow state;
 - editing multiple files in one request;
@@ -425,7 +431,7 @@ The following features remain outside the near-term scope:
 - SQL queries and database connectivity;
 - database writes;
 - Git commit, push, reset, or history rewriting;
-- file deletion;
+- recursive directory deletion;
 - direct integration with a specific LLM provider;
 - MCP or local HTTP integration;
 - graphical user interface;
@@ -498,9 +504,9 @@ The Go implementation must remain small, direct, and idiomatic.
 
 ## Testing Expectations
 
-Tests use root-level `package main`, use `t.TempDir`, and must not modify the real repository.
+Tests are colocated with their focused packages, use the same package name when private helpers require direct testing, use `t.TempDir`, and must not modify the real repository.
 
-Version 0.2.0 tests focus on behavior most likely to damage a project or produce misleading results:
+Version 0.3.0 tests focus on behavior most likely to damage a project or produce misleading results:
 
 1. paths outside the workspace are rejected;
 2. symbolic links are rejected;
@@ -519,7 +525,7 @@ Version 0.2.0 tests focus on behavior most likely to damage a project or produce
 15. error responses do not expose stack traces or unnecessary absolute paths;
 16. existing search, read, edit, and protocol behavior remains compatible.
 
-Before version 0.2.0 is declared complete, run:
+Before version 0.3.0 is declared complete, run:
 
 ```text
 go fmt ./...
@@ -546,7 +552,7 @@ go vet ./...
 - Session persistence: In memory only
 - Project instruction file: `AGENTS.md`
 - Assistant terminology: LLM-neutral
-- Version 0.2.0 operations under protocol version `1`: `tree`, `search`, `read`, `edit`, and `create`
+- Version 0.3.0 operations under protocol version `1`: `tree`, `search`, `read`, `read_range`, `inspect`, `edit`, `create`, `mkdir`, and `delete`
 - Maximum actions per request: 100
 - Maximum replacements per edit action: 100
 - Maximum tree entries per result: 500
@@ -562,7 +568,7 @@ go vet ./...
 - SQL support: Deferred
 - Arbitrary shell execution: Not supported
 
-## Version 0.2.0 Implementation Decisions
+## Version 0.3.0 Implementation Decisions
 
 - Clipboard dependency: `golang.design/x/clipboard`, kept behind focused clipboard functions.
 - Go module version: Go 1.26.5.
@@ -574,8 +580,17 @@ go vet ./...
 - Maximum replacements per edit action: 100.
 - Built-in traversal exclusions: `.git`, `.idea`, `node_modules`, `target`, `build`, `dist`, and `vendor`.
 - `.vscode` remains visible to search and tree operations.
-- Source layout remains a flat root-level `package main` structure.
-- `create.go` and `tree.go` contain the separate filesystem responsibilities introduced in version 0.2.0.
+- The executable entry point is `cmd/atr/main.go`.
+- `internal/app` owns interactive session orchestration and workspace startup validation.
+- `internal/clipboard` isolates the clipboard dependency.
+- `internal/prompt` owns bootstrap-prompt generation and repository-instruction loading.
+- `internal/runner` owns protocol validation, response construction, and focused filesystem operations.
+- Complete-file SHA-256 hashes protect edits and regular-file deletion from stale content.
+- Default response transfer limit: 100,000 characters.
+- Maximum response transfer limit: 120,000 characters.
+- Maximum lines per `read_range` action: 1,000.
+- Directory creation requires an existing parent directory.
+- Directory deletion supports empty directories only; recursive deletion is not supported.
 
 Future decisions must be based on a demonstrated use case and must not introduce speculative architecture.
 
@@ -593,6 +608,6 @@ When `AGENTS.md` exists, read it first and use a targeted edit that preserves it
 
 When `AGENTS.md` does not exist, do not create it automatically merely because it is missing. If the current task reveals useful durable repository instructions, propose a concise file during planning, explain why it is useful, and wait for user approval unless its creation was already explicitly approved. Use `create` only after approval and include only verified repository-specific instructions.
 
-After a target repository's `AGENTS.md` is created or changed, the current ATR session still contains the old in-memory bootstrap prompt. Exit and restart ATR, start a new LLM conversation, and paste the newly generated bootstrap prompt. Automatic `AGENTS.md` reloading is outside version 0.2.0.
+After a target repository's `AGENTS.md` is created or changed, the current ATR session still contains the old in-memory bootstrap prompt. Exit and restart ATR, start a new LLM conversation, and paste the newly generated bootstrap prompt. Automatic `AGENTS.md` reloading is outside version 0.3.0.
 
 Language-specific and project-specific conventions belong in the target repository's own `AGENTS.md`. They are not general rules for Agent Tools Runner.

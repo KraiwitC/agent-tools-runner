@@ -17,13 +17,13 @@ go mod download
 Start ATR in the current project directory:
 
 ```sh
-go run .
+go run ./cmd/atr
 ```
 
 Or select another workspace:
 
 ```sh
-go run . --workspace path/to/project
+go run ./cmd/atr --workspace path/to/project
 ```
 
 ## Test
@@ -38,13 +38,25 @@ go vet ./...
 Windows:
 
 ```powershell
-go build -o dist/atr.exe .
+go build -o dist/atr.exe ./cmd/atr
 ```
 
 macOS or Linux:
 
 ```sh
-go build -o dist/atr .
+go build -o dist/atr ./cmd/atr
 ```
 
 Run the compiled program from the project directory, or pass `--workspace` to select another project.
+
+## Supported operations
+
+- `tree`: List a bounded directory tree.
+- `search`: Search supported text files using case-sensitive literal matching.
+- `read`: Read one or more complete text files and return a SHA-256 hash for each file.
+- `read_range`: Read an inclusive one-based line range and return the complete-file SHA-256 hash.
+- `inspect`: Return file metadata and SHA-256, or report whether a directory is empty.
+- `edit`: Apply exact unique replacements when `expectedSha256` matches the current file.
+- `create`: Create one new UTF-8 text file without overwriting an existing path.
+- `mkdir`: Create one directory whose parent already exists.
+- `delete`: Delete a hash-matched file or an empty directory.
