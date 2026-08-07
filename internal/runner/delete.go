@@ -1,15 +1,11 @@
 package runner
 
-import (
-	"errors"
-	"os"
-	"path/filepath"
-)
+import "os"
 
 func executeDeleteAction(workspace string, action Action, actionIndex int) (string, string, *ResponseError) {
-	resolvedPath, relativePath, err := resolveWorkspaceInspectPath(workspace, action.Path)
+	resolvedPath, relativePath, fileInfo, err := resolveWorkspaceInspectPath(workspace, action.Path)
 	if err != nil {
-		return relativePath, "", workspaceDeleteResponseError(action, actionIndex, err)
+		return relativePath, "", workspaceResponseError(action, actionIndex, err, "DELETE_FAILED", "Could not prepare the requested deletion.", relativePath)
 	}
 	if relativePath == "." {
 		return relativePath, "directory", &ResponseError{
@@ -21,10 +17,6 @@ func executeDeleteAction(workspace string, action Action, actionIndex int) (stri
 		}
 	}
 
-	fileInfo, err := os.Lstat(resolvedPath)
-	if err != nil {
-		return relativePath, "", workspaceDeleteResponseError(action, actionIndex, err)
-	}
 	if fileInfo.IsDir() {
 		return deleteEmptyDirectory(resolvedPath, relativePath, action, actionIndex)
 	}
@@ -42,9 +34,9 @@ func deleteFile(resolvedPath string, relativePath string, action Action, actionI
 		}
 	}
 
-	content, err := readInspectFile(resolvedPath, relativePath)
+	content, err := readTextFile(resolvedPath, relativePath, "Could not open the requested file.", "Could not read the requested file.")
 	if err != nil {
-		return relativePath, "file", workspaceDeleteResponseError(action, actionIndex, err)
+		return relativePath, "file", workspaceResponseError(action, actionIndex, err, "DELETE_FAILED", "Could not prepare the requested deletion.", relativePath)
 	}
 	if calculateSHA256(content) != action.ExpectedSHA256 {
 		return relativePath, "file", &ResponseError{
@@ -107,25 +99,4 @@ func deleteEmptyDirectory(resolvedPath string, relativePath string, action Actio
 		}
 	}
 	return relativePath, "directory", nil
-}
-
-func workspaceDeleteResponseError(action Action, actionIndex int, err error) *ResponseError {
-	var pathError *workspaceError
-	if errors.As(err, &pathError) {
-		return &ResponseError{
-			ActionID:    action.ID,
-			ActionIndex: actionIndex,
-			Code:        pathError.Code,
-			Message:     pathError.Message,
-			Path:        pathError.Path,
-		}
-	}
-
-	return &ResponseError{
-		ActionID:    action.ID,
-		ActionIndex: actionIndex,
-		Code:        "DELETE_FAILED",
-		Message:     "Could not prepare the requested deletion.",
-		Path:        filepath.ToSlash(filepath.Clean(action.Path)),
-	}
 }

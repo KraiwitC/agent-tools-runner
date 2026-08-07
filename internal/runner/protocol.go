@@ -103,47 +103,6 @@ type ResponseError struct {
 	Path        string `json:"path,omitempty"`
 }
 
-type lineScanner interface {
-	Scan() bool
-	Text() string
-	Err() error
-}
-
-func collectJSONRequest(firstLine string, scanner lineScanner) (string, bool, error) {
-	var input strings.Builder
-	input.WriteString(firstLine)
-	for {
-		fmt.Print("... ")
-		if !scanner.Scan() {
-			if scanner.Err() != nil {
-				return "", false, fmt.Errorf("read request: %w", scanner.Err())
-			}
-			return "", false, errors.New("JSON request ended before an empty terminating line")
-		}
-
-		line := scanner.Text()
-		if strings.TrimSpace(line) == "/cancel" {
-			return "", true, nil
-		}
-		if line == "" {
-			return input.String(), false, nil
-		}
-
-		input.WriteString("\n")
-		input.WriteString(line)
-	}
-}
-
-func isJSONRequestStart(input string) bool {
-	trimmedInput := strings.TrimSpace(input)
-	if strings.HasPrefix(trimmedInput, "{") {
-		return true
-	}
-
-	lowerInput := strings.ToLower(trimmedInput)
-	return lowerInput == "```" || lowerInput == "```json" || lowerInput == "~~~" || lowerInput == "~~~json"
-}
-
 func normalizeJSONRequest(requestText string) (string, error) {
 	normalized := strings.TrimSpace(requestText)
 	normalized = removeOpeningJSONFence(normalized)
@@ -193,10 +152,6 @@ func removeTrailingFenceArtifact(input string) string {
 }
 
 func ParseAndValidateRequest(requestText string) (Request, error) {
-	return parseAndValidateRequest(requestText)
-}
-
-func parseAndValidateRequest(requestText string) (Request, error) {
 	normalizedRequest, err := normalizeJSONRequest(requestText)
 	if err != nil {
 		return Request{}, err
@@ -393,10 +348,6 @@ func isValidSHA256(value string) bool {
 }
 
 func ExecuteRequest(workspace string, request Request) string {
-	return executeRequest(workspace, request)
-}
-
-func executeRequest(workspace string, request Request) string {
 	response := Response{
 		Version: protocolVersion,
 		Status:  "success",
@@ -453,102 +404,79 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 		Operation: action.Operation,
 		Status:    "success",
 	}
+	var responseError *ResponseError
 
 	switch action.Operation {
 	case "search":
-		matches, truncated, responseError := executeSearchAction(workspace, action, actionIndex)
+		var matches []SearchMatch
+		var truncated bool
+		matches, truncated, responseError = executeSearchAction(workspace, action, actionIndex)
 		result.Data = &ActionData{
 			Query:     action.Query,
 			Matches:   matches,
 			Truncated: truncated,
 		}
-		if responseError != nil {
-			result.Status = "error"
-			return result, responseError
-		}
 	case "read":
-		files, responseError := executeReadAction(workspace, action, actionIndex)
+		var files []ReadFileResult
+		files, responseError = executeReadAction(workspace, action, actionIndex)
 		result.Data = &ActionData{Files: files}
-		if responseError != nil {
-			result.Status = "error"
-			return result, responseError
-		}
 	case "read_range":
-		readRangeData, responseError := executeReadRangeAction(workspace, action, actionIndex)
-		result.Data = readRangeData
-		if responseError != nil {
-			result.Status = "error"
-			return result, responseError
-		}
+		result.Data, responseError = executeReadRangeAction(workspace, action, actionIndex)
 	case "edit":
-		replacementsApplied, updatedSHA256, responseError := executeEditAction(workspace, action, actionIndex)
+		var replacementsApplied int
+		var updatedSHA256 string
+		replacementsApplied, updatedSHA256, responseError = executeEditAction(workspace, action, actionIndex)
 		result.Data = &ActionData{
 			Path:                filepath.ToSlash(filepath.Clean(action.Path)),
 			SHA256:              updatedSHA256,
 			ReplacementsApplied: replacementsApplied,
 		}
-		if responseError != nil {
-			result.Status = "error"
-			return result, responseError
-		}
 	case "create":
-		bytesWritten, relativePath, responseError := executeCreateAction(workspace, action, actionIndex)
+		var bytesWritten int
+		var relativePath string
+		bytesWritten, relativePath, responseError = executeCreateAction(workspace, action, actionIndex)
 		result.Data = &ActionData{
 			Path:         relativePath,
 			BytesWritten: bytesWritten,
 		}
-		if responseError != nil {
-			result.Status = "error"
-			return result, responseError
+		if responseError == nil {
+			result.Data.SHA256 = calculateSHA256([]byte(action.Content))
 		}
-		result.Data.SHA256 = calculateSHA256([]byte(action.Content))
 	case "tree":
-		entries, relativePath, truncated, responseError := executeTreeAction(workspace, action, actionIndex)
+		var entries []TreeEntry
+		var relativePath string
+		var truncated bool
+		entries, relativePath, truncated, responseError = executeTreeAction(workspace, action, actionIndex)
 		result.Data = &ActionData{
 			Path:      relativePath,
 			Entries:   entries,
 			Truncated: truncated,
 		}
-		if responseError != nil {
-			result.Status = "error"
-			return result, responseError
-		}
 	case "inspect":
-		inspectData, responseError := executeInspectAction(workspace, action, actionIndex)
-		result.Data = inspectData
-		if responseError != nil {
-			result.Status = "error"
-			return result, responseError
-		}
+		result.Data, responseError = executeInspectAction(workspace, action, actionIndex)
 	case "mkdir":
-		relativePath, responseError := executeMkdirAction(workspace, action, actionIndex)
+		var relativePath string
+		relativePath, responseError = executeMkdirAction(workspace, action, actionIndex)
 		result.Data = &ActionData{
 			Path: relativePath,
 			Type: "directory",
 		}
-		if responseError != nil {
-			result.Status = "error"
-			return result, responseError
-		}
 	case "delete":
-		relativePath, pathType, responseError := executeDeleteAction(workspace, action, actionIndex)
+		var relativePath string
+		var pathType string
+		relativePath, pathType, responseError = executeDeleteAction(workspace, action, actionIndex)
 		result.Data = &ActionData{
 			Path: relativePath,
 			Type: pathType,
 		}
-		if responseError != nil {
-			result.Status = "error"
-			return result, responseError
-		}
 	}
-	return result, nil
+	if responseError != nil {
+		result.Status = "error"
+	}
+	return result, responseError
 }
 
 func CreateErrorResponse(code string, message string) string {
-	return createErrorResponse(code, message)
-}
-
-func createErrorResponse(code string, message string) string {
 	response := Response{
 		Version: protocolVersion,
 		Status:  "error",

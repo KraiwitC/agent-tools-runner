@@ -14,7 +14,7 @@ const defaultCreatedFileMode os.FileMode = 0o666
 func executeCreateAction(workspace string, action Action, actionIndex int) (int, string, *ResponseError) {
 	resolvedPath, relativePath, err := resolveWorkspaceCreatePath(workspace, action.Path)
 	if err != nil {
-		return 0, relativePath, workspaceCreateResponseError(action, actionIndex, err)
+		return 0, relativePath, workspaceResponseError(action, actionIndex, err, "WRITE_FAILED", "Could not prepare the requested file creation.", filepath.ToSlash(filepath.Clean(action.Path)))
 	}
 
 	content := []byte(action.Content)
@@ -102,43 +102,8 @@ func resolveWorkspaceCreatePath(workspace string, requestedPath string) (string,
 	}
 
 	parentRelativePath := filepath.Dir(containedPath)
-	parentPath := filepath.Join(workspace, parentRelativePath)
 	if err := validateCreateParentPath(workspace, parentRelativePath, relativePath); err != nil {
 		return "", relativePath, err
-	}
-
-	parentInfo, err := os.Lstat(parentPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", relativePath, newWorkspaceError(
-				"PARENT_DIRECTORY_NOT_FOUND",
-				"A required parent directory does not exist.",
-				relativePath,
-				err,
-			)
-		}
-		return "", relativePath, newWorkspaceError(
-			"WRITE_FAILED",
-			"Could not inspect the parent directory.",
-			relativePath,
-			err,
-		)
-	}
-	if parentInfo.Mode()&os.ModeSymlink != 0 {
-		return "", relativePath, newWorkspaceError(
-			"SYMLINK_NOT_SUPPORTED",
-			"Symbolic links are not supported.",
-			relativePath,
-			nil,
-		)
-	}
-	if !parentInfo.IsDir() {
-		return "", relativePath, newWorkspaceError(
-			"UNSUPPORTED_FILE",
-			"A parent path component is not a directory.",
-			relativePath,
-			nil,
-		)
 	}
 
 	targetInfo, err := os.Lstat(resolvedPath)
@@ -277,25 +242,4 @@ func createFileSafely(path string, content []byte) (int, error) {
 
 	keepTarget = true
 	return int(written), nil
-}
-
-func workspaceCreateResponseError(action Action, actionIndex int, err error) *ResponseError {
-	var pathError *workspaceError
-	if errors.As(err, &pathError) {
-		return &ResponseError{
-			ActionID:    action.ID,
-			ActionIndex: actionIndex,
-			Code:        pathError.Code,
-			Message:     pathError.Message,
-			Path:        pathError.Path,
-		}
-	}
-
-	return &ResponseError{
-		ActionID:    action.ID,
-		ActionIndex: actionIndex,
-		Code:        "WRITE_FAILED",
-		Message:     "Could not prepare the requested file creation.",
-		Path:        filepath.ToSlash(filepath.Clean(action.Path)),
-	}
 }

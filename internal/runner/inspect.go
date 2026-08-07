@@ -12,20 +12,9 @@ import (
 )
 
 func executeInspectAction(workspace string, action Action, actionIndex int) (*ActionData, *ResponseError) {
-	resolvedPath, relativePath, err := resolveWorkspaceInspectPath(workspace, action.Path)
+	resolvedPath, relativePath, fileInfo, err := resolveWorkspaceInspectPath(workspace, action.Path)
 	if err != nil {
-		return &ActionData{Path: relativePath}, workspaceInspectResponseError(action, actionIndex, err)
-	}
-
-	fileInfo, err := os.Lstat(resolvedPath)
-	if err != nil {
-		return &ActionData{Path: relativePath}, &ResponseError{
-			ActionID:    action.ID,
-			ActionIndex: actionIndex,
-			Code:        "READ_FAILED",
-			Message:     "Could not inspect the requested path.",
-			Path:        relativePath,
-		}
+		return &ActionData{Path: relativePath}, workspaceResponseError(action, actionIndex, err, "READ_FAILED", "Could not inspect the requested path.", filepath.ToSlash(filepath.Clean(action.Path)))
 	}
 
 	if fileInfo.IsDir() {
@@ -46,9 +35,9 @@ func executeInspectAction(workspace string, action Action, actionIndex int) (*Ac
 		}, nil
 	}
 
-	content, err := readInspectFile(resolvedPath, relativePath)
+	content, err := readTextFile(resolvedPath, relativePath, "Could not open the requested file.", "Could not read the requested file.")
 	if err != nil {
-		return &ActionData{Path: relativePath, Type: "file"}, workspaceInspectResponseError(action, actionIndex, err)
+		return &ActionData{Path: relativePath, Type: "file"}, workspaceResponseError(action, actionIndex, err, "READ_FAILED", "Could not inspect the requested path.", filepath.ToSlash(filepath.Clean(action.Path)))
 	}
 
 	return &ActionData{
@@ -60,66 +49,46 @@ func executeInspectAction(workspace string, action Action, actionIndex int) (*Ac
 	}, nil
 }
 
-func resolveWorkspaceInspectPath(workspace string, requestedPath string) (string, string, error) {
+func resolveWorkspaceInspectPath(workspace string, requestedPath string) (string, string, os.FileInfo, error) {
 	cleanRequestedPath := filepath.Clean(requestedPath)
 	relativePath := filepath.ToSlash(cleanRequestedPath)
 
 	if filepath.IsAbs(cleanRequestedPath) || filepath.VolumeName(cleanRequestedPath) != "" {
-		return "", relativePath, newWorkspaceError("PATH_OUTSIDE_WORKSPACE", "Absolute and volume-qualified paths are not allowed.", relativePath, nil)
+		return "", relativePath, nil, newWorkspaceError("PATH_OUTSIDE_WORKSPACE", "Absolute and volume-qualified paths are not allowed.", relativePath, nil)
 	}
 
 	resolvedPath := filepath.Join(workspace, cleanRequestedPath)
 	containedPath, err := filepath.Rel(workspace, resolvedPath)
 	if err != nil {
-		return "", relativePath, newWorkspaceError("PATH_OUTSIDE_WORKSPACE", "Could not validate the requested path.", relativePath, err)
+		return "", relativePath, nil, newWorkspaceError("PATH_OUTSIDE_WORKSPACE", "Could not validate the requested path.", relativePath, err)
 	}
 	if containedPath == ".." || strings.HasPrefix(containedPath, ".."+string(filepath.Separator)) {
-		return "", relativePath, newWorkspaceError("PATH_OUTSIDE_WORKSPACE", "Path is outside the selected workspace.", relativePath, nil)
+		return "", relativePath, nil, newWorkspaceError("PATH_OUTSIDE_WORKSPACE", "Path is outside the selected workspace.", relativePath, nil)
 	}
 	if containedPath != "." {
-		if err := rejectSymlinkPath(workspace, containedPath); err != nil {
-			return "", relativePath, err
+		if err := rejectSymlinkParents(workspace, containedPath); err != nil {
+			return "", relativePath, nil, err
 		}
 	}
 
 	fileInfo, err := os.Lstat(resolvedPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", relativePath, newWorkspaceError("FILE_NOT_FOUND", "Path was not found.", relativePath, err)
+			return "", relativePath, nil, newWorkspaceError("FILE_NOT_FOUND", "Path was not found.", relativePath, err)
 		}
-		return "", relativePath, newWorkspaceError("READ_FAILED", "Could not inspect the requested path.", relativePath, err)
+		return "", relativePath, nil, newWorkspaceError("READ_FAILED", "Could not inspect the requested path.", relativePath, err)
 	}
 	if fileInfo.Mode()&os.ModeSymlink != 0 {
-		return "", relativePath, newWorkspaceError("SYMLINK_NOT_SUPPORTED", "Symbolic links are not supported in Version 1.", relativePath, nil)
+		return "", relativePath, nil, newWorkspaceError("SYMLINK_NOT_SUPPORTED", "Symbolic links are not supported in Version 1.", relativePath, nil)
 	}
 	if !fileInfo.IsDir() && !fileInfo.Mode().IsRegular() {
-		return "", relativePath, newWorkspaceError("UNSUPPORTED_FILE", "Path is not a regular file or directory.", relativePath, nil)
+		return "", relativePath, nil, newWorkspaceError("UNSUPPORTED_FILE", "Path is not a regular file or directory.", relativePath, nil)
 	}
 	if fileInfo.Mode().IsRegular() && fileInfo.Size() > maximumFileSize {
-		return "", relativePath, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 1 MiB Version 1 limit.", relativePath, nil)
+		return "", relativePath, nil, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 1 MiB Version 1 limit.", relativePath, nil)
 	}
 
-	return resolvedPath, relativePath, nil
-}
-
-func readInspectFile(resolvedPath string, relativePath string) ([]byte, error) {
-	file, err := os.Open(resolvedPath)
-	if err != nil {
-		return nil, newWorkspaceError("READ_FAILED", "Could not open the requested file.", relativePath, err)
-	}
-	defer file.Close()
-
-	content, err := io.ReadAll(io.LimitReader(file, maximumFileSize+1))
-	if err != nil {
-		return nil, newWorkspaceError("READ_FAILED", "Could not read the requested file.", relativePath, err)
-	}
-	if int64(len(content)) > maximumFileSize {
-		return nil, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 1 MiB Version 1 limit.", relativePath, nil)
-	}
-	if !isSupportedText(content) {
-		return nil, newWorkspaceError("UNSUPPORTED_FILE", "File is not supported UTF-8 text.", relativePath, nil)
-	}
-	return content, nil
+	return resolvedPath, relativePath, fileInfo, nil
 }
 
 func calculateSHA256(content []byte) string {
@@ -153,25 +122,4 @@ func isDirectoryEmpty(path string) (bool, error) {
 		return false, err
 	}
 	return false, nil
-}
-
-func workspaceInspectResponseError(action Action, actionIndex int, err error) *ResponseError {
-	var pathError *workspaceError
-	if errors.As(err, &pathError) {
-		return &ResponseError{
-			ActionID:    action.ID,
-			ActionIndex: actionIndex,
-			Code:        pathError.Code,
-			Message:     pathError.Message,
-			Path:        pathError.Path,
-		}
-	}
-
-	return &ResponseError{
-		ActionID:    action.ID,
-		ActionIndex: actionIndex,
-		Code:        "READ_FAILED",
-		Message:     "Could not inspect the requested path.",
-		Path:        filepath.ToSlash(filepath.Clean(action.Path)),
-	}
 }

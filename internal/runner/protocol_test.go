@@ -19,7 +19,7 @@ func TestParseAndValidateRequestAcceptsValidBatch(t *testing.T) {
 		]
 	}`
 
-	request, err := parseAndValidateRequest(requestText)
+	request, err := ParseAndValidateRequest(requestText)
 	if err != nil {
 		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestParseAndValidateRequestAcceptsValidBatch(t *testing.T) {
 func TestParseAndValidateRequestUsesDefaultTransferLimit(t *testing.T) {
 	requestText := `{"version":"1","actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
 
-	request, err := parseAndValidateRequest(requestText)
+	request, err := ParseAndValidateRequest(requestText)
 	if err != nil {
 		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestParseAndValidateRequestUsesDefaultTransferLimit(t *testing.T) {
 func TestParseAndValidateRequestPreservesExplicitTransferLimit(t *testing.T) {
 	requestText := `{"version":"1","maxTransferChars":64000,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
 
-	request, err := parseAndValidateRequest(requestText)
+	request, err := ParseAndValidateRequest(requestText)
 	if err != nil {
 		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestParseAndValidateRequestPreservesExplicitTransferLimit(t *testing.T) {
 func TestParseAndValidateRequestRejectsTransferLimitBelowMinimum(t *testing.T) {
 	requestText := `{"version":"1","maxTransferChars":999,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected transfer-limit validation error")
 	}
@@ -64,7 +64,7 @@ func TestParseAndValidateRequestRejectsTransferLimitBelowMinimum(t *testing.T) {
 func TestParseAndValidateRequestRejectsTransferLimitAboveMaximum(t *testing.T) {
 	requestText := `{"version":"1","maxTransferChars":120001,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected transfer-limit validation error")
 	}
@@ -75,7 +75,7 @@ func TestParseAndValidateRequestAcceptsTransferLimitBounds(t *testing.T) {
 		t.Run(fmt.Sprintf("limit-%d", limit), func(t *testing.T) {
 			requestText := fmt.Sprintf(`{"version":"1","maxTransferChars":%d,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`, limit)
 
-			request, err := parseAndValidateRequest(requestText)
+			request, err := ParseAndValidateRequest(requestText)
 			if err != nil {
 				t.Fatalf("parseAndValidateRequest returned an error: %v", err)
 			}
@@ -89,7 +89,7 @@ func TestParseAndValidateRequestAcceptsTransferLimitBounds(t *testing.T) {
 func TestParseAndValidateRequestRejectsUnknownField(t *testing.T) {
 	requestText := `{"version":"1","actions":[],"status":"success"}`
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected unknown field validation error")
 	}
@@ -98,7 +98,7 @@ func TestParseAndValidateRequestRejectsUnknownField(t *testing.T) {
 func TestParseAndValidateRequestRejectsEmptyCreateContent(t *testing.T) {
 	requestText := `{"version":"1","actions":[{"id":"create","operation":"create","path":"created.txt","content":""}]}`
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected empty create content validation error")
 	}
@@ -107,7 +107,7 @@ func TestParseAndValidateRequestRejectsEmptyCreateContent(t *testing.T) {
 func TestParseAndValidateRequestRejectsCreateReplacements(t *testing.T) {
 	requestText := `{"version":"1","actions":[{"id":"create","operation":"create","path":"created.txt","content":"content","replacements":[{"oldText":"old","newText":"new"}]}]}`
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected create replacements validation error")
 	}
@@ -116,7 +116,7 @@ func TestParseAndValidateRequestRejectsCreateReplacements(t *testing.T) {
 func TestParseAndValidateRequestRejectsEditContent(t *testing.T) {
 	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","content":"content","expectedSha256":"0000000000000000000000000000000000000000000000000000000000000000","replacements":[{"oldText":"old","newText":"new"}]}]}`
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected edit content validation error")
 	}
@@ -125,7 +125,7 @@ func TestParseAndValidateRequestRejectsEditContent(t *testing.T) {
 func TestParseAndValidateRequestRejectsEmptyEditOldText(t *testing.T) {
 	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","expectedSha256":"0000000000000000000000000000000000000000000000000000000000000000","replacements":[{"oldText":"","newText":"new"}]}]}`
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected empty edit oldText validation error")
 	}
@@ -134,7 +134,7 @@ func TestParseAndValidateRequestRejectsEmptyEditOldText(t *testing.T) {
 func TestParseAndValidateRequestRejectsMissingEditSHA256(t *testing.T) {
 	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","replacements":[{"oldText":"old","newText":"new"}]}]}`
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected missing edit SHA-256 validation error")
 	}
@@ -143,7 +143,7 @@ func TestParseAndValidateRequestRejectsMissingEditSHA256(t *testing.T) {
 func TestParseAndValidateRequestRejectsInvalidEditSHA256(t *testing.T) {
 	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","expectedSha256":"INVALID","replacements":[{"oldText":"old","newText":"new"}]}]}`
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected invalid edit SHA-256 validation error")
 	}
@@ -191,7 +191,7 @@ func TestParseAndValidateRequestRejectsDuplicateActionIDs(t *testing.T) {
 		]
 	}`
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected duplicate action ID validation error")
 	}
@@ -208,7 +208,7 @@ func TestExecuteRequestRejectsOversizedActionResult(t *testing.T) {
 		},
 	}
 
-	responseText := executeRequest(workspace, request)
+	responseText := ExecuteRequest(workspace, request)
 	if len(responseText) > minimumTransferChars {
 		t.Fatalf("expected response within %d characters, got %d", minimumTransferChars, len(responseText))
 	}
@@ -235,7 +235,7 @@ func TestExecuteRequestPreservesResultWithinTransferLimit(t *testing.T) {
 		},
 	}
 
-	responseText := executeRequest(workspace, request)
+	responseText := ExecuteRequest(workspace, request)
 	var response Response
 	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -259,7 +259,7 @@ func TestExecuteRequestStopsAfterFirstFailure(t *testing.T) {
 		},
 	}
 
-	responseText := executeRequest(workspace, request)
+	responseText := ExecuteRequest(workspace, request)
 	var response Response
 	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -279,7 +279,7 @@ func TestExecuteRequestStopsAfterFirstFailure(t *testing.T) {
 }
 
 func TestCreateErrorResponseProducesValidJSON(t *testing.T) {
-	responseText := createErrorResponse("INVALID_REQUEST", "bad request")
+	responseText := CreateErrorResponse("INVALID_REQUEST", "bad request")
 	var response Response
 	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -292,7 +292,7 @@ func TestCreateErrorResponseProducesValidJSON(t *testing.T) {
 func TestParseAndValidateRequestAcceptsFencedJSON(t *testing.T) {
 	requestText := "```json\n{\"version\":\"1\",\"actions\":[{\"id\":\"find\",\"operation\":\"search\",\"query\":\"needle\"}]}\n```"
 
-	request, err := parseAndValidateRequest(requestText)
+	request, err := ParseAndValidateRequest(requestText)
 	if err != nil {
 		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestParseAndValidateRequestAcceptsFencedJSON(t *testing.T) {
 func TestParseAndValidateRequestAcceptsTildeFencedJSON(t *testing.T) {
 	requestText := "~~~json\n{\"version\":\"1\",\"actions\":[{\"id\":\"find\",\"operation\":\"search\",\"query\":\"needle\"}]}\n~~~"
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err != nil {
 		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestParseAndValidateRequestAcceptsTrailingBacktickArtifacts(t *testing.T) {
 		t.Run(suffix, func(t *testing.T) {
 			requestText := "{\"version\":\"1\",\"actions\":[{\"id\":\"find\",\"operation\":\"search\",\"query\":\"needle\"}]}" + suffix
 
-			_, err := parseAndValidateRequest(requestText)
+			_, err := ParseAndValidateRequest(requestText)
 			if err != nil {
 				t.Fatalf("parseAndValidateRequest returned an error: %v", err)
 			}
@@ -326,7 +326,7 @@ func TestParseAndValidateRequestAcceptsTrailingBacktickArtifacts(t *testing.T) {
 func TestParseAndValidateRequestPreservesBackticksInsideJSONStrings(t *testing.T) {
 	requestText := "{\"version\":\"1\",\"actions\":[{\"id\":\"edit\",\"operation\":\"edit\",\"path\":\"README.md\",\"expectedSha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"replacements\":[{\"oldText\":\"Use `go test`\",\"newText\":\"Use `go test ./...`\"}]}]}"
 
-	request, err := parseAndValidateRequest(requestText)
+	request, err := ParseAndValidateRequest(requestText)
 	if err != nil {
 		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestParseAndValidateRequestPreservesBackticksInsideJSONStrings(t *testing.T
 func TestParseAndValidateRequestRejectsExplanatoryProse(t *testing.T) {
 	requestText := "Here is the request:\n{\"version\":\"1\",\"actions\":[{\"id\":\"find\",\"operation\":\"search\",\"query\":\"needle\"}]}"
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected explanatory prose to be rejected")
 	}
@@ -347,7 +347,7 @@ func TestParseAndValidateRequestRejectsExplanatoryProse(t *testing.T) {
 func TestParseAndValidateRequestRejectsMultipleObjects(t *testing.T) {
 	requestText := "{\"version\":\"1\",\"actions\":[{\"id\":\"first\",\"operation\":\"search\",\"query\":\"one\"}]}\n{\"version\":\"1\",\"actions\":[{\"id\":\"second\",\"operation\":\"search\",\"query\":\"two\"}]}"
 
-	_, err := parseAndValidateRequest(requestText)
+	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected multiple JSON objects to be rejected")
 	}

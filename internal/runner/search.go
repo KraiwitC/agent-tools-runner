@@ -96,11 +96,6 @@ func searchFile(workspace string, path string, query string, remainingMatches in
 		return nil, nil
 	}
 
-	fileInfo, err := os.Lstat(path)
-	if err != nil || fileInfo.Size() > maximumFileSize {
-		return nil, err
-	}
-
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err

@@ -3,7 +3,6 @@ package runner
 import (
 	"errors"
 	"os"
-	"path/filepath"
 )
 
 const defaultCreatedDirectoryMode os.FileMode = 0o777
@@ -11,7 +10,7 @@ const defaultCreatedDirectoryMode os.FileMode = 0o777
 func executeMkdirAction(workspace string, action Action, actionIndex int) (string, *ResponseError) {
 	resolvedPath, relativePath, err := resolveWorkspaceCreatePath(workspace, action.Path)
 	if err != nil {
-		return relativePath, workspaceMkdirResponseError(action, actionIndex, err)
+		return relativePath, workspaceResponseError(action, actionIndex, err, "WRITE_FAILED", "Could not prepare the requested directory creation.", relativePath)
 	}
 
 	if err := os.Mkdir(resolvedPath, defaultCreatedDirectoryMode); err != nil {
@@ -43,25 +42,4 @@ func executeMkdirAction(workspace string, action Action, actionIndex int) (strin
 	}
 
 	return relativePath, nil
-}
-
-func workspaceMkdirResponseError(action Action, actionIndex int, err error) *ResponseError {
-	var pathError *workspaceError
-	if errors.As(err, &pathError) {
-		return &ResponseError{
-			ActionID:    action.ID,
-			ActionIndex: actionIndex,
-			Code:        pathError.Code,
-			Message:     pathError.Message,
-			Path:        pathError.Path,
-		}
-	}
-
-	return &ResponseError{
-		ActionID:    action.ID,
-		ActionIndex: actionIndex,
-		Code:        "WRITE_FAILED",
-		Message:     "Could not prepare the requested directory creation.",
-		Path:        filepath.ToSlash(filepath.Clean(action.Path)),
-	}
 }

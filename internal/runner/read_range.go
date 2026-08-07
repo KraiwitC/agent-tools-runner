@@ -1,14 +1,11 @@
 package runner
 
-import (
-	"errors"
-	"strings"
-)
+import "strings"
 
 func executeReadRangeAction(workspace string, action Action, actionIndex int) (*ActionData, *ResponseError) {
 	file, err := readWorkspaceFile(workspace, action.Path)
 	if err != nil {
-		return &ActionData{Path: action.Path}, workspaceReadRangeResponseError(action, actionIndex, err)
+		return &ActionData{Path: action.Path}, workspaceResponseError(action, actionIndex, err, "READ_FAILED", "Could not read the requested file range.", action.Path)
 	}
 
 	lines := splitFileLines(file.Content)
@@ -54,25 +51,4 @@ func splitFileLines(content string) []string {
 		lines = lines[:len(lines)-1]
 	}
 	return lines
-}
-
-func workspaceReadRangeResponseError(action Action, actionIndex int, err error) *ResponseError {
-	var pathError *workspaceError
-	if errors.As(err, &pathError) {
-		return &ResponseError{
-			ActionID:    action.ID,
-			ActionIndex: actionIndex,
-			Code:        pathError.Code,
-			Message:     pathError.Message,
-			Path:        pathError.Path,
-		}
-	}
-
-	return &ResponseError{
-		ActionID:    action.ID,
-		ActionIndex: actionIndex,
-		Code:        "READ_FAILED",
-		Message:     "Could not read the requested file range.",
-		Path:        action.Path,
-	}
 }

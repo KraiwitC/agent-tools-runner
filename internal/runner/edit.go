@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,15 +15,16 @@ type preparedReplacement struct {
 }
 
 func executeEditAction(workspace string, action Action, actionIndex int) (int, string, *ResponseError) {
-	resolvedPath, relativePath, err := resolveWorkspaceFile(workspace, action.Path)
+	resolvedPath, relativePath, fileInfo, err := resolveWorkspaceFile(workspace, action.Path)
 	if err != nil {
-		return 0, "", workspaceEditResponseError(action, actionIndex, err)
+		return 0, "", workspaceResponseError(action, actionIndex, err, "WRITE_FAILED", "Could not prepare the requested file edit.", action.Path)
 	}
 
-	content, fileMode, err := readEditableFile(resolvedPath, relativePath)
+	contentBytes, err := readTextFile(resolvedPath, relativePath, "Could not read the file before editing.", "Could not read the file before editing.")
 	if err != nil {
-		return 0, "", workspaceEditResponseError(action, actionIndex, err)
+		return 0, "", workspaceResponseError(action, actionIndex, err, "WRITE_FAILED", "Could not prepare the requested file edit.", action.Path)
 	}
+	content := string(contentBytes)
 	if calculateSHA256([]byte(content)) != action.ExpectedSHA256 {
 		return 0, "", &ResponseError{
 			ActionID:    action.ID,
@@ -41,7 +41,7 @@ func executeEditAction(workspace string, action Action, actionIndex int) (int, s
 	}
 
 	updatedContent := applyPreparedReplacements(content, preparedReplacements)
-	if err := replaceFile(resolvedPath, updatedContent, fileMode); err != nil {
+	if err := replaceFile(resolvedPath, updatedContent, fileInfo.Mode().Perm()); err != nil {
 		return 0, "", &ResponseError{
 			ActionID:    action.ID,
 			ActionIndex: actionIndex,
@@ -52,35 +52,6 @@ func executeEditAction(workspace string, action Action, actionIndex int) (int, s
 	}
 
 	return len(preparedReplacements), calculateSHA256([]byte(updatedContent)), nil
-}
-
-func readEditableFile(resolvedPath string, relativePath string) (string, os.FileMode, error) {
-	fileInfo, err := os.Lstat(resolvedPath)
-	if err != nil {
-		return "", 0, newWorkspaceError("READ_FAILED", "Could not inspect the file before editing.", relativePath, err)
-	}
-
-	file, err := readWorkspaceFileFromPath(resolvedPath, relativePath)
-	if err != nil {
-		return "", 0, err
-	}
-
-	return file.Content, fileInfo.Mode().Perm(), nil
-}
-
-func readWorkspaceFileFromPath(resolvedPath string, relativePath string) (ReadFileResult, error) {
-	content, err := os.ReadFile(resolvedPath)
-	if err != nil {
-		return ReadFileResult{}, newWorkspaceError("READ_FAILED", "Could not read the file before editing.", relativePath, err)
-	}
-	if int64(len(content)) > maximumFileSize {
-		return ReadFileResult{}, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 1 MiB Version 1 limit.", relativePath, nil)
-	}
-	if !isSupportedText(content) {
-		return ReadFileResult{}, newWorkspaceError("UNSUPPORTED_FILE", "File is not supported UTF-8 text.", relativePath, nil)
-	}
-
-	return ReadFileResult{Path: relativePath, Content: string(content)}, nil
 }
 
 func prepareReplacements(content string, action Action, actionIndex int, relativePath string) ([]preparedReplacement, *ResponseError) {
@@ -178,25 +149,4 @@ func replaceFile(path string, content string, fileMode os.FileMode) error {
 
 	keepTemporaryFile = true
 	return nil
-}
-
-func workspaceEditResponseError(action Action, actionIndex int, err error) *ResponseError {
-	var pathError *workspaceError
-	if errors.As(err, &pathError) {
-		return &ResponseError{
-			ActionID:    action.ID,
-			ActionIndex: actionIndex,
-			Code:        pathError.Code,
-			Message:     pathError.Message,
-			Path:        pathError.Path,
-		}
-	}
-
-	return &ResponseError{
-		ActionID:    action.ID,
-		ActionIndex: actionIndex,
-		Code:        "WRITE_FAILED",
-		Message:     "Could not prepare the requested file edit.",
-		Path:        action.Path,
-	}
 }

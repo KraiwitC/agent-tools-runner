@@ -184,7 +184,7 @@ func TestExecuteRequestStopsAfterFailedCreateAndPreservesEarlierResult(t *testin
 		},
 	}
 
-	responseText := executeRequest(workspace, request)
+	responseText := ExecuteRequest(workspace, request)
 	var response Response
 	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
 		t.Fatalf("decode response: %v", err)

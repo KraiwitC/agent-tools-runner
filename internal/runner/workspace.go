@@ -33,24 +33,7 @@ func executeReadAction(workspace string, action Action, actionIndex int) ([]Read
 	for _, requestedPath := range action.Paths {
 		file, err := readWorkspaceFile(workspace, requestedPath)
 		if err != nil {
-			var pathError *workspaceError
-			if errors.As(err, &pathError) {
-				return files, &ResponseError{
-					ActionID:    action.ID,
-					ActionIndex: actionIndex,
-					Code:        pathError.Code,
-					Message:     pathError.Message,
-					Path:        pathError.Path,
-				}
-			}
-
-			return files, &ResponseError{
-				ActionID:    action.ID,
-				ActionIndex: actionIndex,
-				Code:        "READ_FAILED",
-				Message:     "Could not read the requested file.",
-				Path:        filepath.ToSlash(requestedPath),
-			}
+			return files, workspaceResponseError(action, actionIndex, err, "READ_FAILED", "Could not read the requested file.", filepath.ToSlash(requestedPath))
 		}
 
 		files = append(files, file)
@@ -60,29 +43,14 @@ func executeReadAction(workspace string, action Action, actionIndex int) ([]Read
 }
 
 func readWorkspaceFile(workspace string, requestedPath string) (ReadFileResult, error) {
-	resolvedPath, relativePath, err := resolveWorkspaceFile(workspace, requestedPath)
+	resolvedPath, relativePath, _, err := resolveWorkspaceFile(workspace, requestedPath)
 	if err != nil {
 		return ReadFileResult{}, err
 	}
 
-	file, err := os.Open(resolvedPath)
+	content, err := readTextFile(resolvedPath, relativePath, "Could not open the requested file.", "Could not read the requested file.")
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ReadFileResult{}, newWorkspaceError("FILE_NOT_FOUND", "File was not found.", relativePath, err)
-		}
-		return ReadFileResult{}, newWorkspaceError("READ_FAILED", "Could not open the requested file.", relativePath, err)
-	}
-	defer file.Close()
-
-	content, err := io.ReadAll(io.LimitReader(file, maximumFileSize+1))
-	if err != nil {
-		return ReadFileResult{}, newWorkspaceError("READ_FAILED", "Could not read the requested file.", relativePath, err)
-	}
-	if int64(len(content)) > maximumFileSize {
-		return ReadFileResult{}, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 1 MiB Version 1 limit.", relativePath, nil)
-	}
-	if !isSupportedText(content) {
-		return ReadFileResult{}, newWorkspaceError("UNSUPPORTED_FILE", "File is not supported UTF-8 text.", relativePath, nil)
+		return ReadFileResult{}, err
 	}
 
 	return ReadFileResult{
@@ -92,55 +60,81 @@ func readWorkspaceFile(workspace string, requestedPath string) (ReadFileResult, 
 	}, nil
 }
 
-func resolveWorkspaceFile(workspace string, requestedPath string) (string, string, error) {
+func resolveWorkspaceFile(workspace string, requestedPath string) (string, string, os.FileInfo, error) {
 	cleanRequestedPath := filepath.Clean(requestedPath)
 	relativePath := filepath.ToSlash(cleanRequestedPath)
 
 	if filepath.IsAbs(cleanRequestedPath) || filepath.VolumeName(cleanRequestedPath) != "" {
-		return "", relativePath, newWorkspaceError("PATH_OUTSIDE_WORKSPACE", "Absolute and volume-qualified paths are not allowed.", relativePath, nil)
+		return "", relativePath, nil, newWorkspaceError("PATH_OUTSIDE_WORKSPACE", "Absolute and volume-qualified paths are not allowed.", relativePath, nil)
 	}
 	if cleanRequestedPath == "." || cleanRequestedPath == "" {
-		return "", relativePath, newWorkspaceError("UNSUPPORTED_FILE", "Path must identify a regular file.", relativePath, nil)
+		return "", relativePath, nil, newWorkspaceError("UNSUPPORTED_FILE", "Path must identify a regular file.", relativePath, nil)
 	}
 
 	resolvedPath := filepath.Join(workspace, cleanRequestedPath)
 	containedPath, err := filepath.Rel(workspace, resolvedPath)
 	if err != nil {
-		return "", relativePath, newWorkspaceError("PATH_OUTSIDE_WORKSPACE", "Could not validate the requested path.", relativePath, err)
+		return "", relativePath, nil, newWorkspaceError("PATH_OUTSIDE_WORKSPACE", "Could not validate the requested path.", relativePath, err)
 	}
 	if containedPath == ".." || strings.HasPrefix(containedPath, ".."+string(filepath.Separator)) {
-		return "", relativePath, newWorkspaceError("PATH_OUTSIDE_WORKSPACE", "Path is outside the selected workspace.", relativePath, nil)
+		return "", relativePath, nil, newWorkspaceError("PATH_OUTSIDE_WORKSPACE", "Path is outside the selected workspace.", relativePath, nil)
 	}
 
-	if err := rejectSymlinkPath(workspace, containedPath); err != nil {
-		return "", relativePath, err
+	if err := rejectSymlinkParents(workspace, containedPath); err != nil {
+		return "", relativePath, nil, err
 	}
 
 	fileInfo, err := os.Lstat(resolvedPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", relativePath, newWorkspaceError("FILE_NOT_FOUND", "File was not found.", relativePath, err)
+			return "", relativePath, nil, newWorkspaceError("FILE_NOT_FOUND", "File was not found.", relativePath, err)
 		}
-		return "", relativePath, newWorkspaceError("READ_FAILED", "Could not inspect the requested file.", relativePath, err)
+		return "", relativePath, nil, newWorkspaceError("READ_FAILED", "Could not inspect the requested file.", relativePath, err)
 	}
 	if fileInfo.Mode()&os.ModeSymlink != 0 {
-		return "", relativePath, newWorkspaceError("SYMLINK_NOT_SUPPORTED", "Symbolic links are not supported in Version 1.", relativePath, nil)
+		return "", relativePath, nil, newWorkspaceError("SYMLINK_NOT_SUPPORTED", "Symbolic links are not supported in Version 1.", relativePath, nil)
 	}
 	if !fileInfo.Mode().IsRegular() {
-		return "", relativePath, newWorkspaceError("UNSUPPORTED_FILE", "Path does not identify a regular file.", relativePath, nil)
+		return "", relativePath, nil, newWorkspaceError("UNSUPPORTED_FILE", "Path does not identify a regular file.", relativePath, nil)
 	}
 	if fileInfo.Size() > maximumFileSize {
-		return "", relativePath, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 1 MiB Version 1 limit.", relativePath, nil)
+		return "", relativePath, nil, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 1 MiB Version 1 limit.", relativePath, nil)
 	}
 
-	return resolvedPath, relativePath, nil
+	return resolvedPath, relativePath, fileInfo, nil
 }
 
-func rejectSymlinkPath(workspace string, relativePath string) error {
-	currentPath := workspace
-	parts := strings.Split(filepath.Clean(relativePath), string(filepath.Separator))
+func readTextFile(path string, relativePath string, openMessage string, readMessage string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, newWorkspaceError("FILE_NOT_FOUND", "File was not found.", relativePath, err)
+		}
+		return nil, newWorkspaceError("READ_FAILED", openMessage, relativePath, err)
+	}
+	defer file.Close()
 
-	for _, part := range parts {
+	content, err := io.ReadAll(io.LimitReader(file, maximumFileSize+1))
+	if err != nil {
+		return nil, newWorkspaceError("READ_FAILED", readMessage, relativePath, err)
+	}
+	if int64(len(content)) > maximumFileSize {
+		return nil, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 1 MiB Version 1 limit.", relativePath, nil)
+	}
+	if !isSupportedText(content) {
+		return nil, newWorkspaceError("UNSUPPORTED_FILE", "File is not supported UTF-8 text.", relativePath, nil)
+	}
+	return content, nil
+}
+
+func rejectSymlinkParents(workspace string, relativePath string) error {
+	parentPath := filepath.Dir(filepath.Clean(relativePath))
+	if parentPath == "." {
+		return nil
+	}
+
+	currentPath := workspace
+	for _, part := range strings.Split(parentPath, string(filepath.Separator)) {
 		currentPath = filepath.Join(currentPath, part)
 		fileInfo, err := os.Lstat(currentPath)
 		if err != nil {
@@ -163,6 +157,24 @@ func newWorkspaceError(code string, message string, path string, cause error) er
 		Message: message,
 		Path:    filepath.ToSlash(path),
 		Cause:   cause,
+	}
+}
+
+func workspaceResponseError(action Action, actionIndex int, err error, fallbackCode string, fallbackMessage string, fallbackPath string) *ResponseError {
+	var pathError *workspaceError
+	if errors.As(err, &pathError) {
+		return newActionResponseError(action, actionIndex, pathError.Code, pathError.Message, pathError.Path)
+	}
+	return newActionResponseError(action, actionIndex, fallbackCode, fallbackMessage, fallbackPath)
+}
+
+func newActionResponseError(action Action, actionIndex int, code string, message string, path string) *ResponseError {
+	return &ResponseError{
+		ActionID:    action.ID,
+		ActionIndex: actionIndex,
+		Code:        code,
+		Message:     message,
+		Path:        path,
 	}
 }
 

@@ -15,7 +15,7 @@ var errTreeLimitReached = errors.New("tree entry limit reached")
 func executeTreeAction(workspace string, action Action, actionIndex int) ([]TreeEntry, string, bool, *ResponseError) {
 	resolvedPath, relativePath, err := resolveWorkspaceDirectory(workspace, action.Path)
 	if err != nil {
-		return nil, relativePath, false, workspaceTreeResponseError(action, actionIndex, err)
+		return nil, relativePath, false, workspaceResponseError(action, actionIndex, err, "TREE_FAILED", "Could not prepare the requested project tree.", filepath.ToSlash(filepath.Clean(action.Path)))
 	}
 
 	entries, truncated, err := readWorkspaceTree(workspace, resolvedPath)
@@ -65,7 +65,7 @@ func resolveWorkspaceDirectory(workspace string, requestedPath string) (string, 
 	}
 
 	if containedPath != "." {
-		if err := rejectSymlinkPath(workspace, containedPath); err != nil {
+		if err := rejectSymlinkParents(workspace, containedPath); err != nil {
 			return "", relativePath, err
 		}
 	}
@@ -160,25 +160,4 @@ func readWorkspaceTree(workspace string, root string) ([]TreeEntry, bool, error)
 	}
 
 	return entries, truncated, nil
-}
-
-func workspaceTreeResponseError(action Action, actionIndex int, err error) *ResponseError {
-	var pathError *workspaceError
-	if errors.As(err, &pathError) {
-		return &ResponseError{
-			ActionID:    action.ID,
-			ActionIndex: actionIndex,
-			Code:        pathError.Code,
-			Message:     pathError.Message,
-			Path:        pathError.Path,
-		}
-	}
-
-	return &ResponseError{
-		ActionID:    action.ID,
-		ActionIndex: actionIndex,
-		Code:        "TREE_FAILED",
-		Message:     "Could not prepare the requested project tree.",
-		Path:        filepath.ToSlash(filepath.Clean(action.Path)),
-	}
 }
