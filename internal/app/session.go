@@ -23,12 +23,82 @@ type lineScanner interface {
 }
 
 func Run(workspace string, bootstrapPrompt string, clipboardReady bool, input io.Reader) {
-	scanner := bufio.NewScanner(input)
-	scanner.Buffer(make([]byte, scannerInitialBufferSize), scannerMaximumBufferSize)
+	cleanup, interactive, _ := enableNonCanonicalInput()
+	defer cleanup()
+
+	var scanner lineScanner
+	if interactive {
+		scanner = newTerminalLineReader(input)
+	} else {
+		bufScanner := bufio.NewScanner(input)
+		bufScanner.Buffer(make([]byte, scannerInitialBufferSize), scannerMaximumBufferSize)
+		scanner = bufScanner
+	}
 	runSession(workspace, bootstrapPrompt, clipboardReady, scanner)
 }
 
-func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, scanner *bufio.Scanner) {
+type terminalLineReader struct {
+	reader *bufio.Reader
+	line   string
+	err    error
+}
+
+func newTerminalLineReader(r io.Reader) *terminalLineReader {
+	return &terminalLineReader{
+		reader: bufio.NewReader(r),
+	}
+}
+
+func (t *terminalLineReader) Scan() bool {
+	var lineRunes []rune
+	for {
+		r, _, err := t.reader.ReadRune()
+		if err != nil {
+			if len(lineRunes) > 0 {
+				t.line = string(lineRunes)
+				t.err = nil
+				return true
+			}
+			t.err = err
+			return false
+		}
+
+		if r == '\x7f' || r == '\x08' {
+			if len(lineRunes) > 0 {
+				lineRunes = lineRunes[:len(lineRunes)-1]
+				fmt.Print("\b \b")
+			}
+			continue
+		}
+
+		if r == '\r' {
+			fmt.Println()
+			t.line = string(lineRunes)
+			return true
+		}
+		if r == '\n' {
+			fmt.Println()
+			t.line = string(lineRunes)
+			return true
+		}
+
+		lineRunes = append(lineRunes, r)
+		fmt.Print(string(r))
+	}
+}
+
+func (t *terminalLineReader) Text() string {
+	return t.line
+}
+
+func (t *terminalLineReader) Err() error {
+	if errors.Is(t.err, io.EOF) {
+		return nil
+	}
+	return t.err
+}
+
+func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, scanner lineScanner) {
 	lastResponse := ""
 	for {
 		fmt.Print("> ")
