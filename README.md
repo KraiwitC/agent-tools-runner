@@ -40,12 +40,14 @@ Windows:
 
 ```powershell
 go build -o dist/atr.exe ./cmd/atr
+$env:GOOS="darwin"; $env:GOARCH="arm64"; go build -o dist/atr ./cmd/atr
 ```
 
 macOS or Linux:
 
 ```sh
 go build -o dist/atr ./cmd/atr
+GOOS=windows GOARCH=amd64 go build -o dist/atr.exe ./cmd/atr
 ```
 
 Run the compiled program from the project directory, or pass `--workspace` to select another project.
