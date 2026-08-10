@@ -10,7 +10,10 @@ import (
 	"agent-tools-runner/internal/prompt"
 )
 
-const applicationName = "Agent Tools Runner"
+const (
+	applicationName    = "Agent Tools Runner"
+	applicationVersion = "v0.3.2"
+)
 
 func main() {
 	workspaceFlag := flag.String("workspace", ".", "project workspace directory")
@@ -30,7 +33,7 @@ func main() {
 
 	clipboardReady, clipboardErr := atrclipboard.Initialize()
 
-	fmt.Println(applicationName)
+	fmt.Println(applicationName + " " + applicationVersion)
 	fmt.Printf("Workspace: %s\n", workspace)
 	if agentsFileFound {
 		fmt.Printf("Project instructions: %s found\n", prompt.AgentsFileName)
