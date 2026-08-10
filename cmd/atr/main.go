@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	applicationName = "Agent Tools Runner"
+	applicationName    = "Agent Tools Runner"
 	applicationVersion = "v0.3.2"
 )
 
