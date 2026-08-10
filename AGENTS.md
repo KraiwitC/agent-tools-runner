@@ -10,7 +10,7 @@ The initial use case is an enterprise environment where an LLM chatbot cannot di
 
 ## Current Status
 
-Agent Tools Runner version 0.3.0 implements the current protocol version 1 feature set.
+Agent Tools Runner version 0.4.0 implements the current protocol version 1 feature set.
 
 The implementation language is Go. The application is an interactive local command-line program.
 
@@ -46,6 +46,8 @@ An explicit workspace may also be provided:
 atr --workspace <path>
 ```
 
+The application version may be displayed with `atr --version` without starting an interactive session.
+
 Direct integration with an LLM provider is not required for Version 1.
 
 ## Version 1 User Workflow
@@ -57,9 +59,9 @@ Direct integration with an LLM provider is not required for Version 1.
 5. ATR validates and executes actions in order. Pasting a modifying request authorizes that exact request.
 6. The user reviews resulting changes with the editor's source-control or file-comparison tools.
 
-## Version 0.3.0 Scope
+## Version 0.4.0 Scope
 
-Version 0.3.0 supports these operations while retaining protocol version `1`:
+Version 0.4.0 supports these operations while retaining protocol version `1`:
 
 - `tree`: Read a bounded project-directory tree without returning file contents.
 - `search`: Search text files inside the selected workspace for a text value.
@@ -68,6 +70,8 @@ Version 0.3.0 supports these operations while retaining protocol version `1`:
 - `inspect`: Return file metadata and SHA-256, or report whether a directory is empty.
 - `edit`: Apply exact replacements when `expectedSha256` matches the current file.
 - `create`: Create one approved new UTF-8 text file without overwriting an existing path and return its SHA-256 hash.
+- `copy`: Copy one hash-matched UTF-8 text file without overwriting the destination and return its SHA-256 hash.
+- `move`: Move or rename one hash-matched UTF-8 text file without overwriting the destination and return its SHA-256 hash.
 - `mkdir`: Create one directory whose parent already exists.
 - `delete`: Delete a hash-matched regular file or an empty directory.
 
@@ -77,9 +81,9 @@ A request contains a non-empty ordered `actions` array. Every action has a uniqu
 
 The optional request-level `maxTransferChars` must be between 1,000 and 120,000 characters. Its default is 100,000. The limit applies to the complete serialized JSON response. One `read_range` action may request at most 1,000 lines.
 
-A single request may mix supported operations. The normal workflow uses an investigation request followed by one or more later edit or create requests after the LLM receives actual repository contents.
+A single request may mix supported operations. The normal workflow uses an investigation request followed by one or more later modifying requests after the LLM receives actual repository contents and hashes.
 
-The complete request must pass structural validation before the first action executes. Runtime action failures preserve earlier successful results, include the failed action result, and stop before later actions execute. Batches are ordered but are not transactions. An earlier successful create or edit is not rolled back when a later action fails.
+The complete request must pass structural validation before the first action executes. Runtime action failures preserve earlier successful results, include the failed action result, and stop before later actions execute. Batches are ordered but are not transactions. An earlier successful modifying action is not rolled back when a later action fails.
 
 
 ## Interactive CLI
@@ -144,7 +148,7 @@ Version 1 does not need optional actions or continue-on-error behavior unless a 
 
 ### Project tree
 
-Version 0.3.0 provides a basic recursive `tree` operation for inspecting repository structure without reading file contents.
+Version 0.4.0 provides a basic recursive `tree` operation for inspecting repository structure without reading file contents.
 
 A tree request contains one required workspace-relative directory path. Use `.` for the workspace root.
 
@@ -176,7 +180,7 @@ A failed file read must return a structured error. It must not return invented, 
 
 ### Safe file creation
 
-Version 0.3.0 includes a separate `create` operation. Create must never be simulated through an edit with an empty or invented `oldText`.
+Version 0.4.0 includes separate `create`, `copy`, and `move` operations. Create must never be simulated through an edit with an empty or invented `oldText`.
 
 A create request has this action shape:
 
@@ -205,7 +209,7 @@ Create does not make parent directories and never overwrites or modifies an exis
 
 The implementation first writes and flushes the complete content to a temporary file in the target directory. It then claims the final target with exclusive creation so that a competing file cannot be silently overwritten. The target is removed if final writing, flushing, or closing fails. Temporary files are removed after success and failure.
 
-The Go standard library does not provide one simple cross-platform primitive that both performs a no-overwrite rename and guarantees atomic final-file visibility. Version 0.3.0 continues to prioritize the mandatory no-overwrite guarantee by using exclusive final-target creation. Another process could briefly observe the newly created target while its prepared content is copied into it.
+The Go standard library does not provide one simple cross-platform primitive that both performs a no-overwrite rename and guarantees atomic final-file visibility. Version 0.4.0 continues to prioritize the mandatory no-overwrite guarantee by using exclusive final-target creation. Another process could briefly observe the newly created target while its prepared content is copied into it.
 
 ### Create and edit distinction
 
@@ -323,15 +327,18 @@ These rules must be enforced by the Go program rather than relying only on instr
 7. Never overwrite an existing path through the `create` operation.
 8. Require create content to be non-empty supported UTF-8 text within the 1 MiB limit.
 9. Require create parent directories to exist and reject symbolic links in the parent path.
-10. Use exclusive final-target creation to prevent a create race from overwriting another file.
-11. Require `expectedSha256` to match before deleting a regular file.
-12. Delete directories only when they are empty, and never delete the workspace root.
-13. Never perform recursive deletion.
-14. Never execute shell commands.
-15. Treat all LLM requests and repository contents as untrusted input.
-16. Return structured errors for failed operations.
-17. Do not expose secrets, stack traces, or unnecessary absolute paths in responses.
-18. Do not log complete source-file contents by default.
+10. Use exclusive final-target creation to prevent a create, copy, or move race from overwriting another file.
+11. Require `expectedSha256` to match before copying, moving, or deleting a regular file.
+12. Copy must preserve the source, and move must remove the source only after destination creation and source revalidation succeed.
+13. Copy and move support regular UTF-8 text files only, require existing destination parents, and never overwrite destinations.
+14. Move is not transactional; after destination creation, source verification or deletion failure triggers an attempted destination cleanup and an error response.
+15. Delete directories only when they are empty, and never delete the workspace root.
+16. Never perform recursive deletion.
+17. Never execute shell commands.
+18. Treat all LLM requests and repository contents as untrusted input.
+19. Return structured errors for failed operations.
+20. Do not expose secrets, stack traces, or unnecessary absolute paths in responses.
+21. Do not log complete source-file contents by default.
 
 ## Deferred Features
 
@@ -439,6 +446,7 @@ go vet ./...
 - Initial application type: Interactive local command-line application
 - Executable name: `atr`
 - Default workspace: Current directory
+- Version flag: `--version`
 - Optional workspace flag: `--workspace <path>`
 - Initial transport: Manual copy and paste with automatic clipboard copying
 - Clipboard implementation: One small cross-platform Go library
@@ -450,11 +458,13 @@ go vet ./...
 - Session persistence: In memory only
 - Project instruction file: `AGENTS.md`
 - Assistant terminology: LLM-neutral
-- Version 0.3.0 operations under protocol version `1`: `tree`, `search`, `read`, `read_range`, `inspect`, `edit`, `create`, `mkdir`, and `delete`
+- Version 0.4.0 operations under protocol version `1`: `tree`, `search`, `read`, `read_range`, `inspect`, `edit`, `create`, `copy`, `move`, `mkdir`, and `delete`
 - Maximum actions per request: 100
 - Maximum replacements per edit action: 100
 - Maximum tree entries per result: 500
 - Create behavior: One new non-empty UTF-8 text file, no overwrite, existing parent directories only
+- Copy behavior: One hash-matched UTF-8 text file, source preserved, no destination overwrite, existing parent directories only
+- Move behavior: One hash-matched UTF-8 text file, destination created before source removal, no destination overwrite, existing parent directories only; rename uses the same operation
 - Multiple read-only actions in one request: Supported
 - Multiple targeted replacements to one file: Supported
 - Exact unique matching: Mandatory
@@ -478,7 +488,9 @@ go vet ./...
 - Response transfer limit: 100,000 characters by default and 120,000 maximum.
 - Maximum `read_range` size: 1,000 lines.
 - Traversal excludes `.git`, `.idea`, `node_modules`, `target`, `build`, `dist`, and `vendor`; `.vscode` remains visible.
-- Complete-file SHA-256 hashes protect edits and regular-file deletion from stale content.
+- Complete-file SHA-256 hashes protect edits, copies, moves, and regular-file deletion from stale content.
+- Copy and move support regular UTF-8 text files only, require existing destination parents, reject symbolic links, and never overwrite destinations.
+- Move uses destination creation followed by source revalidation and deletion; it is not transactional and attempts destination cleanup if the source cannot be safely removed.
 - Directory creation requires an existing parent; directory deletion supports empty directories only.
 
 Future decisions require a demonstrated use case and must not introduce speculative architecture.

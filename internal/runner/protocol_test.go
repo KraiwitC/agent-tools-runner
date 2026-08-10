@@ -15,6 +15,8 @@ func TestParseAndValidateRequestAcceptsValidBatch(t *testing.T) {
 			{"id": "read", "operation": "read", "paths": ["main.go"]},
 			{"id": "edit", "operation": "edit", "path": "main.go", "expectedSha256": "0000000000000000000000000000000000000000000000000000000000000000", "replacements": [{"oldText": "old", "newText": "new"}]},
 			{"id": "create", "operation": "create", "path": "created.txt", "content": "created content"},
+			{"id": "copy", "operation": "copy", "source": "source.txt", "destination": "copied.txt", "expectedSha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+			{"id": "move", "operation": "move", "source": "copied.txt", "destination": "moved.txt", "expectedSha256": "0000000000000000000000000000000000000000000000000000000000000000"},
 			{"id": "tree", "operation": "tree", "path": "."}
 		]
 	}`
@@ -23,8 +25,8 @@ func TestParseAndValidateRequestAcceptsValidBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
 	}
-	if len(request.Actions) != 5 {
-		t.Fatalf("expected five actions, got %d", len(request.Actions))
+	if len(request.Actions) != 7 {
+		t.Fatalf("expected seven actions, got %d", len(request.Actions))
 	}
 }
 
@@ -110,6 +112,24 @@ func TestParseAndValidateRequestRejectsCreateReplacements(t *testing.T) {
 	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected create replacements validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsCopyWithoutDestination(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"copy","operation":"copy","source":"source.txt","expectedSha256":"0000000000000000000000000000000000000000000000000000000000000000"}]}`
+
+	_, err := ParseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected missing copy destination validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsMoveWithoutSHA256(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"move","operation":"move","source":"source.txt","destination":"moved.txt"}]}`
+
+	_, err := ParseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected missing move SHA-256 validation error")
 	}
 }
 
