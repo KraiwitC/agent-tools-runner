@@ -229,8 +229,8 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 	if action.Operation != "read_range" && (action.StartLine != 0 || action.EndLine != 0) {
 		return fmt.Errorf("actions[%d] contains range fields that are only supported for read_range", index)
 	}
-	if action.Operation != "copy" && (action.Source != "" || action.Destination != "") {
-		return fmt.Errorf("actions[%d] contains source or destination fields that are only supported for copy", index)
+	if action.Operation != "copy" && action.Operation != "move" && (action.Source != "" || action.Destination != "") {
+		return fmt.Errorf("actions[%d] contains source or destination fields that are only supported for copy or move", index)
 	}
 
 	switch action.Operation {
@@ -300,18 +300,18 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		if action.Query != "" || len(action.Paths) != 0 || action.Source != "" || action.Destination != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for create", index)
 		}
-	case "copy":
+	case "copy", "move":
 		if strings.TrimSpace(action.Source) == "" {
-			return fmt.Errorf("actions[%d].source is required for copy", index)
+			return fmt.Errorf("actions[%d].source is required for %s", index, action.Operation)
 		}
 		if strings.TrimSpace(action.Destination) == "" {
-			return fmt.Errorf("actions[%d].destination is required for copy", index)
+			return fmt.Errorf("actions[%d].destination is required for %s", index, action.Operation)
 		}
 		if !isValidSHA256(action.ExpectedSHA256) {
-			return fmt.Errorf("actions[%d].expectedSha256 must be a lowercase SHA-256 hash for copy", index)
+			return fmt.Errorf("actions[%d].expectedSha256 must be a lowercase SHA-256 hash for %s", index, action.Operation)
 		}
 		if action.Query != "" || len(action.Paths) != 0 || action.Path != "" || action.Content != "" || len(action.Replacements) != 0 {
-			return fmt.Errorf("actions[%d] contains fields that are not supported for copy", index)
+			return fmt.Errorf("actions[%d] contains fields that are not supported for %s", index, action.Operation)
 		}
 	case "tree":
 		if strings.TrimSpace(action.Path) == "" {
@@ -468,6 +468,16 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 		result.Data = &ActionData{
 			Path:         relativePath,
 			SHA256:       copiedSHA256,
+			BytesWritten: bytesWritten,
+		}
+	case "move":
+		var bytesWritten int
+		var relativePath string
+		var movedSHA256 string
+		bytesWritten, relativePath, movedSHA256, responseError = executeMoveAction(workspace, action, actionIndex)
+		result.Data = &ActionData{
+			Path:         relativePath,
+			SHA256:       movedSHA256,
 			BytesWritten: bytesWritten,
 		}
 	case "tree":
