@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        run: go test ./...
+      - name: Build
+        run: |
+          mkdir dist
+          GOOS=windows GOARCH=amd64 go build -o "dist/atr_${GITHUB_REF_NAME}_windows_amd64.exe" ./cmd/atr
+          GOOS=darwin GOARCH=arm64 go build -o "dist/atr_${GITHUB_REF_NAME}_darwin_arm64" ./cmd/atr
+      - name: Publish
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --generate-notes --title "${GITHUB_REF_NAME}"
+        env:
+          GH_TOKEN: ${{ github.token }}
