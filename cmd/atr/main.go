@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"agent-tools-runner/internal/app"
@@ -12,14 +13,25 @@ import (
 
 const (
 	applicationName    = "Agent Tools Runner"
-	applicationVersion = "v0.3.2"
+	applicationVersion = "v0.4.0"
 )
 
-func main() {
-	workspaceFlag := flag.String("workspace", ".", "project workspace directory")
-	flag.Parse()
+type options struct {
+	workspace string
+	version   bool
+}
 
-	workspace, err := app.ResolveWorkspace(*workspaceFlag)
+func main() {
+	options, err := parseOptions(os.Args[1:], os.Stderr)
+	if err != nil {
+		os.Exit(2)
+	}
+	if options.version {
+		fmt.Println(applicationVersion)
+		return
+	}
+
+	workspace, err := app.ResolveWorkspace(options.workspace)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to open workspace: %v\n", err)
 		os.Exit(1)
@@ -54,4 +66,20 @@ func main() {
 	fmt.Println("Type /help for commands.")
 
 	app.Run(workspace, bootstrapPrompt, clipboardReady, os.Stdin)
+}
+
+func parseOptions(args []string, output io.Writer) (options, error) {
+	flagSet := flag.NewFlagSet("atr", flag.ContinueOnError)
+	flagSet.SetOutput(output)
+
+	workspace := flagSet.String("workspace", ".", "project workspace directory")
+	version := flagSet.Bool("version", false, "show application version")
+	if err := flagSet.Parse(args); err != nil {
+		return options{}, err
+	}
+
+	return options{
+		workspace: *workspace,
+		version:   *version,
+	}, nil
 }
