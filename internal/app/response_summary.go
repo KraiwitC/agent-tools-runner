@@ -45,7 +45,7 @@ func summarizeResponse(responseText string) (string, error) {
 
 func responseOperationLabel(operation string) string {
 	if operation == "read_range" {
-		return "RANGE"
+		return "READ"
 	}
 	return strings.ToUpper(operation)
 }

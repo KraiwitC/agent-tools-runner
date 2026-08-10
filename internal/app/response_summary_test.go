@@ -130,7 +130,7 @@ func TestSummarizeResponseFormatsReadSearchTreeAndRange(t *testing.T) {
 		"  READ      2 files\n" +
 		"  SEARCH    \"needle\" (1 match), truncated\n" +
 		"  TREE      . (2 entries), truncated\n" +
-		"  RANGE     service.go (lines 20-80 of 240)"
+		"  READ      service.go (lines 20-80 of 240)"
 	if summary != expected {
 		t.Fatalf("unexpected summary:\n%s\n\nexpected:\n%s", summary, expected)
 	}
