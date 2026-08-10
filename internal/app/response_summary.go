@@ -45,7 +45,7 @@ func summarizeResponse(responseText string) (string, error) {
 
 func responseOperationLabel(operation string) string {
 	if operation == "read_range" {
-		return "RANGE"
+		return "READ"
 	}
 	return strings.ToUpper(operation)
 }
@@ -72,7 +72,7 @@ func summarizeActionResult(result runner.ActionResult) string {
 			return data.Path
 		}
 		return fmt.Sprintf("%s (%d %s)", data.Path, data.ReplacementsApplied, pluralize(data.ReplacementsApplied, "replacement", "replacements"))
-	case "create":
+	case "create", "copy", "move":
 		return fmt.Sprintf("%s (%d bytes)", data.Path, data.BytesWritten)
 	case "tree":
 		detail := fmt.Sprintf("%s (%d %s)", data.Path, len(data.Entries), pluralize(len(data.Entries), "entry", "entries"))

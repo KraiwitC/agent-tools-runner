@@ -32,6 +32,8 @@ type Action struct {
 	Query          string        `json:"query,omitempty"`
 	Paths          []string      `json:"paths,omitempty"`
 	Path           string        `json:"path,omitempty"`
+	Source         string        `json:"source,omitempty"`
+	Destination    string        `json:"destination,omitempty"`
 	Content        string        `json:"content,omitempty"`
 	StartLine      int           `json:"startLine,omitempty"`
 	EndLine        int           `json:"endLine,omitempty"`
@@ -227,6 +229,9 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 	if action.Operation != "read_range" && (action.StartLine != 0 || action.EndLine != 0) {
 		return fmt.Errorf("actions[%d] contains range fields that are only supported for read_range", index)
 	}
+	if action.Operation != "copy" && action.Operation != "move" && (action.Source != "" || action.Destination != "") {
+		return fmt.Errorf("actions[%d] contains source or destination fields that are only supported for copy or move", index)
+	}
 
 	switch action.Operation {
 	case "search":
@@ -292,8 +297,21 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		if action.Content == "" {
 			return fmt.Errorf("actions[%d].content must not be empty for create", index)
 		}
-		if action.Query != "" || len(action.Paths) != 0 || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
+		if action.Query != "" || len(action.Paths) != 0 || action.Source != "" || action.Destination != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for create", index)
+		}
+	case "copy", "move":
+		if strings.TrimSpace(action.Source) == "" {
+			return fmt.Errorf("actions[%d].source is required for %s", index, action.Operation)
+		}
+		if strings.TrimSpace(action.Destination) == "" {
+			return fmt.Errorf("actions[%d].destination is required for %s", index, action.Operation)
+		}
+		if !isValidSHA256(action.ExpectedSHA256) {
+			return fmt.Errorf("actions[%d].expectedSha256 must be a lowercase SHA-256 hash for %s", index, action.Operation)
+		}
+		if action.Query != "" || len(action.Paths) != 0 || action.Path != "" || action.Content != "" || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for %s", index, action.Operation)
 		}
 	case "tree":
 		if strings.TrimSpace(action.Path) == "" {
@@ -441,6 +459,26 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 		}
 		if responseError == nil {
 			result.Data.SHA256 = calculateSHA256([]byte(action.Content))
+		}
+	case "copy":
+		var bytesWritten int
+		var relativePath string
+		var copiedSHA256 string
+		bytesWritten, relativePath, copiedSHA256, responseError = executeCopyAction(workspace, action, actionIndex)
+		result.Data = &ActionData{
+			Path:         relativePath,
+			SHA256:       copiedSHA256,
+			BytesWritten: bytesWritten,
+		}
+	case "move":
+		var bytesWritten int
+		var relativePath string
+		var movedSHA256 string
+		bytesWritten, relativePath, movedSHA256, responseError = executeMoveAction(workspace, action, actionIndex)
+		result.Data = &ActionData{
+			Path:         relativePath,
+			SHA256:       movedSHA256,
+			BytesWritten: bytesWritten,
 		}
 	case "tree":
 		var entries []TreeEntry

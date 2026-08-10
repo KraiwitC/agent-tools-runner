@@ -26,6 +26,12 @@ Or select another workspace:
 go run ./cmd/atr --workspace path/to/project
 ```
 
+Show the application version:
+
+```sh
+go run ./cmd/atr --version
+```
+
 ## Test
 
 ```sh
@@ -61,5 +67,7 @@ Run the compiled program from the project directory, or pass `--workspace` to se
 - `inspect`: Return file metadata and SHA-256, or report whether a directory is empty.
 - `edit`: Apply exact unique replacements when `expectedSha256` matches the current file.
 - `create`: Create one new UTF-8 text file without overwriting an existing path.
+- `copy`: Copy a hash-matched UTF-8 text file without overwriting the destination.
+- `move`: Move or rename a hash-matched UTF-8 text file without overwriting the destination.
 - `mkdir`: Create one directory whose parent already exists.
 - `delete`: Delete a hash-matched file or an empty directory.

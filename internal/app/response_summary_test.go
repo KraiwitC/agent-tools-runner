@@ -33,6 +33,24 @@ func TestSummarizeResponseFormatsSuccessfulActions(t *testing.T) {
 				},
 			},
 			{
+				ID:        "copy-file",
+				Operation: "copy",
+				Status:    "success",
+				Data: &runner.ActionData{
+					Path:         "copied.yaml",
+					BytesWritten: 154,
+				},
+			},
+			{
+				ID:        "move-file",
+				Operation: "move",
+				Status:    "success",
+				Data: &runner.ActionData{
+					Path:         "moved.yaml",
+					BytesWritten: 154,
+				},
+			},
+			{
 				ID:        "inspect-directory",
 				Operation: "inspect",
 				Status:    "success",
@@ -63,6 +81,8 @@ func TestSummarizeResponseFormatsSuccessfulActions(t *testing.T) {
 	expected := "SUCCESS\n\n" +
 		"  EDIT      abc.py (2 replacements)\n" +
 		"  CREATE    config.yaml (154 bytes)\n" +
+		"  COPY      copied.yaml (154 bytes)\n" +
+		"  MOVE      moved.yaml (154 bytes)\n" +
 		"  INSPECT   generated (directory, empty)\n" +
 		"  DELETE    obsolete.txt (file)"
 	if summary != expected {
@@ -130,7 +150,7 @@ func TestSummarizeResponseFormatsReadSearchTreeAndRange(t *testing.T) {
 		"  READ      2 files\n" +
 		"  SEARCH    \"needle\" (1 match), truncated\n" +
 		"  TREE      . (2 entries), truncated\n" +
-		"  RANGE     service.go (lines 20-80 of 240)"
+		"  READ      service.go (lines 20-80 of 240)"
 	if summary != expected {
 		t.Fatalf("unexpected summary:\n%s\n\nexpected:\n%s", summary, expected)
 	}
