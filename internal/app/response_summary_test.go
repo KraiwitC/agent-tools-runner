@@ -117,6 +117,17 @@ func TestSummarizeResponseFormatsReadSearchTreeAndRange(t *testing.T) {
 				},
 			},
 			{
+				ID:        "ranked-search-code",
+				Operation: "ranked_search",
+				Status:    "success",
+				Data: &runner.ActionData{
+					Query: "executeMoveActions",
+					RankedMatches: []runner.RankedSearchMatch{
+						{Path: "internal/runner/move.go", Line: 9, MatchType: "fuzzy_identifier", Score: 0.943},
+					},
+				},
+			},
+			{
 				ID:        "read-tree",
 				Operation: "tree",
 				Status:    "success",
@@ -149,6 +160,7 @@ func TestSummarizeResponseFormatsReadSearchTreeAndRange(t *testing.T) {
 	expected := "SUCCESS\n\n" +
 		"  READ      2 files\n" +
 		"  SEARCH    \"needle\" (1 match), truncated\n" +
+		"  R_SEARCH  \"executeMoveActions\" (1 match)\n" +
 		"  TREE      . (2 entries), truncated\n" +
 		"  READ      service.go (lines 20-80 of 240)"
 	if summary != expected {

@@ -10,7 +10,7 @@ The initial use case is an enterprise environment where an LLM chatbot cannot di
 
 ## Current Status
 
-Agent Tools Runner version 0.4.0 implements the current protocol version 1 feature set.
+Agent Tools Runner version 0.5.0 implements the current protocol version 1 feature set.
 
 The implementation language is Go. The application is an interactive local command-line program.
 
@@ -59,12 +59,13 @@ Direct integration with an LLM provider is not required for Version 1.
 5. ATR validates and executes actions in order. Pasting a modifying request authorizes that exact request.
 6. The user reviews resulting changes with the editor's source-control or file-comparison tools.
 
-## Version 0.4.0 Scope
+## Version 0.5.0 Scope
 
-Version 0.4.0 supports these operations while retaining protocol version `1`:
+Version 0.5.0 supports these operations while retaining protocol version `1`:
 
 - `tree`: Read a bounded project-directory tree without returning file contents.
-- `search`: Search text files inside the selected workspace for a text value.
+- `search`: Search text files inside the selected workspace using case-sensitive literal matching.
+- `ranked_search`: Find confidence-ranked matches using exact, case-insensitive, identifier-aware, and fuzzy lexical matching.
 - `read`: Read one or more complete text files and return a complete-file SHA-256 hash.
 - `read_range`: Read an inclusive one-based line range and return the complete-file SHA-256 hash.
 - `inspect`: Return file metadata and SHA-256, or report whether a directory is empty.
@@ -133,7 +134,7 @@ Provider-specific integration may be added later without changing the core runti
 
 ### Batched read-only actions
 
-One request may contain multiple related `search` and `read` actions.
+One request may contain multiple related `search`, `ranked_search`, and `read` actions.
 
 Actions execute in their declared order.
 
@@ -148,7 +149,7 @@ Version 1 does not need optional actions or continue-on-error behavior unless a 
 
 ### Project tree
 
-Version 0.4.0 provides a basic recursive `tree` operation for inspecting repository structure without reading file contents.
+Version 0.5.0 provides a basic recursive `tree` operation for inspecting repository structure without reading file contents.
 
 A tree request contains one required workspace-relative directory path. Use `.` for the workspace root.
 
@@ -160,9 +161,13 @@ Tree traversal skips symbolic links and uses the same built-in directory exclusi
 
 Version 1 provides a basic case-sensitive literal text search implemented in Go.
 
-It does not initially require regular expressions, fuzzy matching, external search programs, parallel searching, or advanced glob syntax.
+The `search` operation remains case-sensitive literal matching. It does not require regular expressions, external search programs, parallel searching, or advanced glob syntax.
 
-Search results identify the workspace-relative file path, one-based line number, and matching line text. A search returns at most 100 matches and reports `truncated=true` when additional matches exist.
+The read-only `ranked_search` operation combines exact, case-insensitive, identifier-aware, and fuzzy lexical matching. Its query must contain at least two letters or digits. Fuzzy matching is disabled when the query contains fewer than three letters or digits.
+
+Literal search results identify the workspace-relative file path, one-based line number, and matching line text. A search returns at most 100 matches and reports `truncated=true` when additional matches exist.
+
+Ranked search results additionally return `matchType` and a deterministic confidence `score`. Results are ordered by score, match-type priority, path, and line. A ranked search returns at most 20 matches and reports `truncated=true` when additional candidates exist. Ranked matches are discovery suggestions only; the LLM must read the selected file before editing, and edits remain exact and hash-protected.
 
 Version 1 uses one centralized built-in directory exclusion set in `search.go`: `.git`, `.idea`, `node_modules`, `target`, `build`, `dist`, and `vendor`. `.vscode` remains searchable because it may contain useful project configuration. Configurable exclusions are deferred until a real use case requires them.
 
@@ -180,7 +185,7 @@ A failed file read must return a structured error. It must not return invented, 
 
 ### Safe file creation
 
-Version 0.4.0 includes separate `create`, `copy`, and `move` operations. Create must never be simulated through an edit with an empty or invented `oldText`.
+Version 0.5.0 includes separate `create`, `copy`, and `move` operations. Create must never be simulated through an edit with an empty or invented `oldText`.
 
 A create request has this action shape:
 
@@ -209,7 +214,7 @@ Create does not make parent directories and never overwrites or modifies an exis
 
 The implementation first writes and flushes the complete content to a temporary file in the target directory. It then claims the final target with exclusive creation so that a competing file cannot be silently overwritten. The target is removed if final writing, flushing, or closing fails. Temporary files are removed after success and failure.
 
-The Go standard library does not provide one simple cross-platform primitive that both performs a no-overwrite rename and guarantees atomic final-file visibility. Version 0.4.0 continues to prioritize the mandatory no-overwrite guarantee by using exclusive final-target creation. Another process could briefly observe the newly created target while its prepared content is copied into it.
+The Go standard library does not provide one simple cross-platform primitive that both performs a no-overwrite rename and guarantees atomic final-file visibility. Version 0.5.0 continues to prioritize the mandatory no-overwrite guarantee by using exclusive final-target creation. Another process could briefly observe the newly created target while its prepared content is copied into it.
 
 ### Create and edit distinction
 
@@ -458,7 +463,7 @@ go vet ./...
 - Session persistence: In memory only
 - Project instruction file: `AGENTS.md`
 - Assistant terminology: LLM-neutral
-- Version 0.4.0 operations under protocol version `1`: `tree`, `search`, `read`, `read_range`, `inspect`, `edit`, `create`, `copy`, `move`, `mkdir`, and `delete`
+- Current operations under protocol version `1`: `tree`, `search`, `ranked_search`, `read`, `read_range`, `inspect`, `edit`, `create`, `copy`, `move`, `mkdir`, and `delete`
 - Maximum actions per request: 100
 - Maximum replacements per edit action: 100
 - Maximum tree entries per result: 500
@@ -484,10 +489,11 @@ go vet ./...
 - `internal/app` owns session orchestration and workspace startup validation.
 - `internal/prompt` owns bootstrap-prompt generation and repository-instruction loading.
 - `internal/runner` owns protocol validation, response construction, and filesystem operations.
-- Maximum file size: 1 MiB; maximum search matches: 100; maximum tree entries: 500.
+- Maximum file size: 1 MiB; maximum literal search matches: 100; maximum ranked search matches: 20; maximum tree entries: 500.
 - Response transfer limit: 100,000 characters by default and 120,000 maximum.
 - Maximum `read_range` size: 1,000 lines.
-- Traversal excludes `.git`, `.idea`, `node_modules`, `target`, `build`, `dist`, and `vendor`; `.vscode` remains visible.
+- Literal and ranked search traversal excludes `.git`, `.idea`, `node_modules`, `target`, `build`, `dist`, and `vendor`; `.vscode` remains visible.
+- Ranked search is read-only, requires at least two letters or digits, disables fuzzy matching below three letters or digits, and never relaxes exact edit matching.
 - Complete-file SHA-256 hashes protect edits, copies, moves, and regular-file deletion from stale content.
 - Copy and move support regular UTF-8 text files only, require existing destination parents, reject symbolic links, and never overwrite destinations.
 - Move uses destination creation followed by source revalidation and deletion; it is not transactional and attempts destination cleanup if the source cannot be safely removed.

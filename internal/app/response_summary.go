@@ -47,6 +47,9 @@ func responseOperationLabel(operation string) string {
 	if operation == "read_range" {
 		return "READ"
 	}
+	if operation == "ranked_search" {
+		return "R_SEARCH"
+	}
 	return strings.ToUpper(operation)
 }
 
@@ -59,6 +62,9 @@ func summarizeActionResult(result runner.ActionResult) string {
 	switch result.Operation {
 	case "search":
 		detail := fmt.Sprintf("%q (%d %s)", data.Query, len(data.Matches), pluralize(len(data.Matches), "match", "matches"))
+		return appendTruncated(detail, data.Truncated)
+	case "ranked_search":
+		detail := fmt.Sprintf("%q (%d %s)", data.Query, len(data.RankedMatches), pluralize(len(data.RankedMatches), "match", "matches"))
 		return appendTruncated(detail, data.Truncated)
 	case "read":
 		if len(data.Files) == 1 {
