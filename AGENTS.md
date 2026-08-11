@@ -10,7 +10,7 @@ The initial use case is an enterprise environment where an LLM chatbot cannot di
 
 ## Current Status
 
-Agent Tools Runner version 0.4.0 implements the current protocol version 1 feature set.
+Agent Tools Runner version 0.5.0 implements the current protocol version 1 feature set.
 
 The implementation language is Go. The application is an interactive local command-line program.
 
@@ -59,12 +59,13 @@ Direct integration with an LLM provider is not required for Version 1.
 5. ATR validates and executes actions in order. Pasting a modifying request authorizes that exact request.
 6. The user reviews resulting changes with the editor's source-control or file-comparison tools.
 
-## Version 0.4.0 Scope
+## Version 0.5.0 Scope
 
-Version 0.4.0 supports these operations while retaining protocol version `1`:
+Version 0.5.0 supports these operations while retaining protocol version `1`:
 
 - `tree`: Read a bounded project-directory tree without returning file contents.
-- `search`: Search text files inside the selected workspace for a text value.
+- `search`: Search text files inside the selected workspace using case-sensitive literal matching.
+- `ranked_search`: Find confidence-ranked matches using exact, case-insensitive, identifier-aware, and fuzzy lexical matching.
 - `read`: Read one or more complete text files and return a complete-file SHA-256 hash.
 - `read_range`: Read an inclusive one-based line range and return the complete-file SHA-256 hash.
 - `inspect`: Return file metadata and SHA-256, or report whether a directory is empty.
@@ -148,7 +149,7 @@ Version 1 does not need optional actions or continue-on-error behavior unless a 
 
 ### Project tree
 
-Version 0.4.0 provides a basic recursive `tree` operation for inspecting repository structure without reading file contents.
+Version 0.5.0 provides a basic recursive `tree` operation for inspecting repository structure without reading file contents.
 
 A tree request contains one required workspace-relative directory path. Use `.` for the workspace root.
 
@@ -184,7 +185,7 @@ A failed file read must return a structured error. It must not return invented, 
 
 ### Safe file creation
 
-Version 0.4.0 includes separate `create`, `copy`, and `move` operations. Create must never be simulated through an edit with an empty or invented `oldText`.
+Version 0.5.0 includes separate `create`, `copy`, and `move` operations. Create must never be simulated through an edit with an empty or invented `oldText`.
 
 A create request has this action shape:
 
@@ -213,7 +214,7 @@ Create does not make parent directories and never overwrites or modifies an exis
 
 The implementation first writes and flushes the complete content to a temporary file in the target directory. It then claims the final target with exclusive creation so that a competing file cannot be silently overwritten. The target is removed if final writing, flushing, or closing fails. Temporary files are removed after success and failure.
 
-The Go standard library does not provide one simple cross-platform primitive that both performs a no-overwrite rename and guarantees atomic final-file visibility. Version 0.4.0 continues to prioritize the mandatory no-overwrite guarantee by using exclusive final-target creation. Another process could briefly observe the newly created target while its prepared content is copied into it.
+The Go standard library does not provide one simple cross-platform primitive that both performs a no-overwrite rename and guarantees atomic final-file visibility. Version 0.5.0 continues to prioritize the mandatory no-overwrite guarantee by using exclusive final-target creation. Another process could briefly observe the newly created target while its prepared content is copied into it.
 
 ### Create and edit distinction
 
