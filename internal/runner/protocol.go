@@ -61,23 +61,24 @@ type ActionResult struct {
 }
 
 type ActionData struct {
-	Files               []ReadFileResult `json:"files,omitempty"`
-	Query               string           `json:"query,omitempty"`
-	Matches             []SearchMatch    `json:"matches,omitempty"`
-	Entries             []TreeEntry      `json:"entries,omitempty"`
-	Truncated           bool             `json:"truncated,omitempty"`
-	Path                string           `json:"path,omitempty"`
-	Type                string           `json:"type,omitempty"`
-	Content             string           `json:"content,omitempty"`
-	StartLine           int              `json:"startLine,omitempty"`
-	EndLine             int              `json:"endLine,omitempty"`
-	TotalLines          int              `json:"totalLines,omitempty"`
-	SizeBytes           int64            `json:"sizeBytes,omitempty"`
-	LineCount           int              `json:"lineCount,omitempty"`
-	SHA256              string           `json:"sha256,omitempty"`
-	Empty               *bool            `json:"empty,omitempty"`
-	ReplacementsApplied int              `json:"replacementsApplied,omitempty"`
-	BytesWritten        int              `json:"bytesWritten,omitempty"`
+	Files               []ReadFileResult    `json:"files,omitempty"`
+	Query               string              `json:"query,omitempty"`
+	Matches             []SearchMatch       `json:"matches,omitempty"`
+	RankedMatches       []RankedSearchMatch `json:"rankedMatches,omitempty"`
+	Entries             []TreeEntry         `json:"entries,omitempty"`
+	Truncated           bool                `json:"truncated,omitempty"`
+	Path                string              `json:"path,omitempty"`
+	Type                string              `json:"type,omitempty"`
+	Content             string              `json:"content,omitempty"`
+	StartLine           int                 `json:"startLine,omitempty"`
+	EndLine             int                 `json:"endLine,omitempty"`
+	TotalLines          int                 `json:"totalLines,omitempty"`
+	SizeBytes           int64               `json:"sizeBytes,omitempty"`
+	LineCount           int                 `json:"lineCount,omitempty"`
+	SHA256              string              `json:"sha256,omitempty"`
+	Empty               *bool               `json:"empty,omitempty"`
+	ReplacementsApplied int                 `json:"replacementsApplied,omitempty"`
+	BytesWritten        int                 `json:"bytesWritten,omitempty"`
 }
 
 type TreeEntry struct {
@@ -89,6 +90,14 @@ type SearchMatch struct {
 	Path string `json:"path"`
 	Line int    `json:"line"`
 	Text string `json:"text"`
+}
+
+type RankedSearchMatch struct {
+	Path      string  `json:"path"`
+	Line      int     `json:"line"`
+	Text      string  `json:"text"`
+	MatchType string  `json:"matchType"`
+	Score     float64 `json:"score"`
 }
 
 type ReadFileResult struct {
@@ -240,6 +249,13 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		}
 		if len(action.Paths) != 0 || action.Path != "" || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for search", index)
+		}
+	case "ranked_search":
+		if countLettersAndDigits(action.Query) < minimumRankedSearchCharacters {
+			return fmt.Errorf("actions[%d].query must contain at least %d letters or digits for ranked_search", index, minimumRankedSearchCharacters)
+		}
+		if len(action.Paths) != 0 || action.Path != "" || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for ranked_search", index)
 		}
 	case "read":
 		if len(action.Paths) == 0 {
@@ -433,6 +449,15 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 			Query:     action.Query,
 			Matches:   matches,
 			Truncated: truncated,
+		}
+	case "ranked_search":
+		var matches []RankedSearchMatch
+		var truncated bool
+		matches, truncated, responseError = executeRankedSearchAction(workspace, action, actionIndex)
+		result.Data = &ActionData{
+			Query:         action.Query,
+			RankedMatches: matches,
+			Truncated:     truncated,
 		}
 	case "read":
 		var files []ReadFileResult

@@ -12,6 +12,7 @@ func TestParseAndValidateRequestAcceptsValidBatch(t *testing.T) {
 		"version": "1",
 		"actions": [
 			{"id": "search", "operation": "search", "query": "needle"},
+			{"id": "ranked-search", "operation": "ranked_search", "query": "executeMoveActions"},
 			{"id": "read", "operation": "read", "paths": ["main.go"]},
 			{"id": "edit", "operation": "edit", "path": "main.go", "expectedSha256": "0000000000000000000000000000000000000000000000000000000000000000", "replacements": [{"oldText": "old", "newText": "new"}]},
 			{"id": "create", "operation": "create", "path": "created.txt", "content": "created content"},
@@ -25,8 +26,8 @@ func TestParseAndValidateRequestAcceptsValidBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
 	}
-	if len(request.Actions) != 7 {
-		t.Fatalf("expected seven actions, got %d", len(request.Actions))
+	if len(request.Actions) != 8 {
+		t.Fatalf("expected eight actions, got %d", len(request.Actions))
 	}
 }
 
@@ -94,6 +95,54 @@ func TestParseAndValidateRequestRejectsUnknownField(t *testing.T) {
 	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected unknown field validation error")
+	}
+}
+
+func TestParseAndValidateRequestAcceptsSingleCharacterLiteralSearch(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"search","operation":"search","query":"a"}]}`
+
+	_, err := ParseAndValidateRequest(requestText)
+	if err != nil {
+		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
+	}
+}
+
+func TestParseAndValidateRequestAcceptsRankedSearch(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"ranked-search","operation":"ranked_search","query":"ID"}]}`
+
+	request, err := ParseAndValidateRequest(requestText)
+	if err != nil {
+		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
+	}
+	if request.Actions[0].Operation != "ranked_search" {
+		t.Fatalf("unexpected operation: %q", request.Actions[0].Operation)
+	}
+}
+
+func TestParseAndValidateRequestRejectsShortRankedSearchQuery(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"ranked-search","operation":"ranked_search","query":"a"}]}`
+
+	_, err := ParseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected short ranked_search query validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsRankedSearchWithoutLettersOrDigits(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"ranked-search","operation":"ranked_search","query":"_-"}]}`
+
+	_, err := ParseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected ranked_search query validation error")
+	}
+}
+
+func TestParseAndValidateRequestRejectsRankedSearchPath(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"ranked-search","operation":"ranked_search","query":"move","path":"move.go"}]}`
+
+	_, err := ParseAndValidateRequest(requestText)
+	if err == nil {
+		t.Fatal("expected unsupported ranked_search path validation error")
 	}
 }
 
