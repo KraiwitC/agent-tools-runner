@@ -151,7 +151,7 @@ Version 1 does not need optional actions or continue-on-error behavior unless a 
 
 ### Project tree
 
-Version 0.6.0 provides a basic recursive `tree` operation for inspecting repository structure without reading file contents.
+Version 0.5.0 introduced a basic recursive `tree` operation for inspecting repository structure without reading file contents.
 
 A tree request contains one required workspace-relative directory path. Use `.` for the workspace root.
 
@@ -187,7 +187,7 @@ A failed file read must return a structured error. It must not return invented, 
 
 ### Safe file creation
 
-Version 0.6.0 includes separate `create`, `copy`, and `move` operations. Create must never be simulated through an edit with an empty or invented `oldText`.
+Version 0.5.0 introduced separate `create`, `copy`, and `move` operations. Create must never be simulated through an edit with an empty or invented `oldText`.
 
 A create request has this action shape:
 
@@ -216,7 +216,7 @@ Create does not make parent directories and never overwrites or modifies an exis
 
 The implementation first writes and flushes the complete content to a temporary file in the target directory. It then claims the final target with exclusive creation so that a competing file cannot be silently overwritten. The target is removed if final writing, flushing, or closing fails. Temporary files are removed after success and failure.
 
-The Go standard library does not provide one simple cross-platform primitive that both performs a no-overwrite rename and guarantees atomic final-file visibility. Version 0.6.0 continues to prioritize the mandatory no-overwrite guarantee by using exclusive final-target creation. Another process could briefly observe the newly created target while its prepared content is copied into it.
+The Go standard library does not provide one simple cross-platform primitive that both performs a no-overwrite rename and guarantees atomic final-file visibility. Version 0.5.0 prioritized the mandatory no-overwrite guarantee by using exclusive final-target creation, and the current implementation retains that design. Another process could briefly observe the newly created target while its prepared content is copied into it.
 
 ### Create and edit distinction
 
