@@ -18,11 +18,19 @@ jobs:
           cache: true
       - name: Test
         run: go test ./...
+      - name: Verify release version
+        run: |
+          application_version="$(go run ./cmd/atr --version)"
+          if [ "${application_version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Release tag ${GITHUB_REF_NAME} does not match application version ${application_version}." >&2
+            exit 1
+          fi
       - name: Build
         run: |
           mkdir dist
           GOOS=windows GOARCH=amd64 go build -o "dist/atr_${GITHUB_REF_NAME}_windows_amd64.exe" ./cmd/atr
           GOOS=darwin GOARCH=arm64 go build -o "dist/atr_${GITHUB_REF_NAME}_darwin_arm64" ./cmd/atr
+          GOOS=linux GOARCH=amd64 go build -o "dist/atr_${GITHUB_REF_NAME}_linux_amd64" ./cmd/atr
       - name: Publish
         run: gh release create "${GITHUB_REF_NAME}" dist/* --verify-tag --generate-notes --title "${GITHUB_REF_NAME}"
         env:
