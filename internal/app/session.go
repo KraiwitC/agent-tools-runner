@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	atrclipboard "agent-tools-runner/internal/clipboard"
+	"agent-tools-runner/internal/prompt"
 	"agent-tools-runner/internal/runner"
 )
 
@@ -22,7 +23,7 @@ type lineScanner interface {
 	Err() error
 }
 
-func Run(workspace string, bootstrapPrompt string, clipboardReady bool, input io.Reader) {
+func Run(workspace string, clipboardReady bool, input io.Reader) {
 	cleanup, interactive, _ := enableNonCanonicalInput()
 	defer cleanup()
 
@@ -34,7 +35,7 @@ func Run(workspace string, bootstrapPrompt string, clipboardReady bool, input io
 		bufScanner.Buffer(make([]byte, scannerInitialBufferSize), scannerMaximumBufferSize)
 		scanner = bufScanner
 	}
-	runSession(workspace, bootstrapPrompt, clipboardReady, scanner)
+	runSession(workspace, clipboardReady, scanner)
 }
 
 type terminalLineReader struct {
@@ -98,7 +99,7 @@ func (t *terminalLineReader) Err() error {
 	return t.err
 }
 
-func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, scanner lineScanner) {
+func runSession(workspace string, clipboardReady bool, scanner lineScanner) {
 	lastResponse := ""
 	for {
 		fmt.Print("> ")
@@ -112,7 +113,7 @@ func runSession(workspace string, bootstrapPrompt string, clipboardReady bool, s
 		}
 
 		if strings.HasPrefix(input, "/") {
-			if handleCommand(input, workspace, bootstrapPrompt, lastResponse, clipboardReady) {
+			if handleCommand(input, workspace, lastResponse, clipboardReady) {
 				return
 			}
 			continue
@@ -184,20 +185,29 @@ func isJSONRequestStart(input string) bool {
 	return lowerInput == "```" || lowerInput == "```json" || lowerInput == "~~~" || lowerInput == "~~~json"
 }
 
-func handleCommand(command string, workspace string, bootstrapPrompt string, lastResponse string, clipboardReady bool) bool {
+func handleCommand(command string, workspace string, lastResponse string, clipboardReady bool) bool {
 	shouldExit := false
 	switch command {
 	case "/help":
 		printHelp()
 	case "/prompt":
-		if clipboardReady {
+		bootstrapPrompt, _, err := prompt.Create(workspace)
+		if err != nil {
+			fmt.Printf("Failed to refresh LLM bootstrap prompt: %v\n", err)
+		} else if clipboardReady {
 			atrclipboard.Copy(bootstrapPrompt)
-			fmt.Println("LLM bootstrap prompt copied to clipboard.")
+			fmt.Println("Refreshed LLM bootstrap prompt copied to clipboard.")
+			fmt.Println("Start a new conversation and paste the prompt for refreshed project instructions to take effect.")
 		} else {
-			fmt.Println("Clipboard is unavailable. Type /show-prompt to display the bootstrap prompt.")
+			fmt.Println("Clipboard is unavailable. Type /show-prompt to display a refreshed bootstrap prompt.")
 		}
 	case "/show-prompt":
-		fmt.Println(bootstrapPrompt)
+		bootstrapPrompt, _, err := prompt.Create(workspace)
+		if err != nil {
+			fmt.Printf("Failed to refresh LLM bootstrap prompt: %v\n", err)
+		} else {
+			fmt.Println(bootstrapPrompt)
+		}
 	case "/copy":
 		if lastResponse == "" {
 			fmt.Println("No JSON response is available to copy.")

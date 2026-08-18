@@ -13,7 +13,7 @@ import (
 
 const (
 	applicationName    = "Agent Tools Runner"
-	applicationVersion = "v0.5.0"
+	applicationVersion = "v0.6.0"
 )
 
 type options struct {
@@ -65,7 +65,7 @@ func main() {
 	fmt.Println("Paste a JSON request, then press Enter on an empty line to run it.")
 	fmt.Println("Type /help for commands.")
 
-	app.Run(workspace, bootstrapPrompt, clipboardReady, os.Stdin)
+	app.Run(workspace, clipboardReady, os.Stdin)
 }
 
 func parseOptions(args []string, output io.Writer) (options, error) {

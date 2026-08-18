@@ -10,7 +10,7 @@ The initial use case is an enterprise environment where an LLM chatbot cannot di
 
 ## Current Status
 
-Agent Tools Runner version 0.5.0 implements the current protocol version 1 feature set.
+Agent Tools Runner version 0.6.0 implements the current protocol version 1 feature set.
 
 The implementation language is Go. The application is an interactive local command-line program.
 
@@ -54,14 +54,16 @@ Direct integration with an LLM provider is not required for Version 1.
 
 1. The user starts `atr` from the target project directory or supplies `--workspace <path>`.
 2. ATR loads the workspace's `AGENTS.md` when present, prepares the bootstrap prompt, and copies it to the clipboard.
-3. The user describes a requirement, and the LLM investigates the repository, proposes a plan, and waits for approval.
-4. The user transfers approved JSON requests to ATR and returns structured responses to the LLM.
-5. ATR validates and executes actions in order. Pasting a modifying request authorizes that exact request.
-6. The user reviews resulting changes with the editor's source-control or file-comparison tools.
+3. The LLM infers whether the request is exploration, debugging, review, or modification and keeps its response and planning depth proportional to the task.
+4. Before repository access, the LLM proposes a concise read-only investigation and waits for approval. A simple lookup may use a one-sentence proposal.
+5. When modification is intended, the LLM uses verified investigation results to propose a concise implementation plan and waits for separate implementation approval.
+6. The user transfers approved JSON requests to ATR and returns structured responses to the LLM.
+7. ATR validates and executes actions in order. Pasting a modifying request authorizes that exact request.
+8. The user reviews resulting changes with the editor's source-control or file-comparison tools.
 
-## Version 0.5.0 Scope
+## Version 0.6.0 Scope
 
-Version 0.5.0 supports these operations while retaining protocol version `1`:
+Version 0.6.0 supports these operations while retaining protocol version `1`:
 
 - `tree`: Read a bounded project-directory tree without returning file contents.
 - `search`: Search text files inside the selected workspace using case-sensitive literal matching.
@@ -102,13 +104,13 @@ Supported commands:
 - `/clear`: Clear the terminal without deleting the last response.
 - `/exit`: End the session.
 
-The session keeps the workspace, bootstrap prompt, and last JSON response in memory only.
+The session keeps the workspace and last JSON response in memory only. `/prompt` and `/show-prompt` regenerate the bootstrap prompt from the current workspace instructions when invoked.
 
 ## LLM Bootstrap Prompt
 
 At startup, ATR generates and copies a provider-neutral bootstrap prompt describing the planning and approval workflow, supported operations, request and response formats, safety rules, exact editing requirements, and repository instructions. The LLM must use actual ATR results and must not claim success before ATR reports it.
 
-When the selected workspace contains `AGENTS.md`, its contents are included. If it is absent, prompt generation still succeeds and states that no repository-specific instructions were found. ATR does not reload repository instructions during a session; restart ATR after changing `AGENTS.md`.
+When the selected workspace contains `AGENTS.md`, its contents are included. If it is absent, prompt generation still succeeds and states that no repository-specific instructions were found. `/prompt` and `/show-prompt` reload `AGENTS.md` and regenerate the prompt without restarting ATR. A new LLM conversation is still required for refreshed instructions to take full effect.
 
 ## Clipboard Behavior
 
@@ -149,7 +151,7 @@ Version 1 does not need optional actions or continue-on-error behavior unless a 
 
 ### Project tree
 
-Version 0.5.0 provides a basic recursive `tree` operation for inspecting repository structure without reading file contents.
+Version 0.6.0 provides a basic recursive `tree` operation for inspecting repository structure without reading file contents.
 
 A tree request contains one required workspace-relative directory path. Use `.` for the workspace root.
 
@@ -185,7 +187,7 @@ A failed file read must return a structured error. It must not return invented, 
 
 ### Safe file creation
 
-Version 0.5.0 includes separate `create`, `copy`, and `move` operations. Create must never be simulated through an edit with an empty or invented `oldText`.
+Version 0.6.0 includes separate `create`, `copy`, and `move` operations. Create must never be simulated through an edit with an empty or invented `oldText`.
 
 A create request has this action shape:
 
@@ -214,7 +216,7 @@ Create does not make parent directories and never overwrites or modifies an exis
 
 The implementation first writes and flushes the complete content to a temporary file in the target directory. It then claims the final target with exclusive creation so that a competing file cannot be silently overwritten. The target is removed if final writing, flushing, or closing fails. Temporary files are removed after success and failure.
 
-The Go standard library does not provide one simple cross-platform primitive that both performs a no-overwrite rename and guarantees atomic final-file visibility. Version 0.5.0 continues to prioritize the mandatory no-overwrite guarantee by using exclusive final-target creation. Another process could briefly observe the newly created target while its prepared content is copied into it.
+The Go standard library does not provide one simple cross-platform primitive that both performs a no-overwrite rename and guarantees atomic final-file visibility. Version 0.6.0 continues to prioritize the mandatory no-overwrite guarantee by using exclusive final-target creation. Another process could briefly observe the newly created target while its prepared content is copied into it.
 
 ### Create and edit distinction
 
@@ -370,20 +372,21 @@ Deferred items are not automatically approved for implementation.
 
 Follow this workflow while developing Agent Tools Runner.
 
-### Understand first
+### Understand and investigate first
 
-- Restate the requested change in your own words.
-- List assumptions.
-- Ask clarifying questions when the intent is ambiguous.
-- Do not invent existing file contents, function signatures, imports, configuration, or behavior.
-- Request the exact current file when it is needed and has not been provided.
+- Infer whether the request is exploration, debugging, review, or modification; do not require the user to select a mode.
+- Match response depth to the request. Answer simple questions directly and keep plans concise and proportional.
+- Before repository access, propose a concise read-only investigation and wait for approval. A simple lookup may use a one-sentence proposal.
+- Separate confirmed facts from assumptions when useful, and ask only questions requiring a user or business decision.
+- Do not invent existing paths, file contents, function signatures, imports, configuration, or behavior.
 
-### Plan before coding
+### Plan modifications from evidence
 
-- Propose a short implementation plan.
-- Identify which files will be inspected or changed.
-- Explain the purpose of each change and the implementation order.
-- Wait for user approval before writing code.
+- Use an implementation plan only when repository modification is intended.
+- After investigation, identify exact verified files, proposed changes, implementation order, important exclusions, and concise acceptance criteria.
+- Explain and obtain approval for required new files.
+- Report findings that change the approved scope before proceeding.
+- Wait for separate implementation approval before requesting modifying actions.
 
 ### Implement step by step
 
@@ -399,6 +402,7 @@ Follow this workflow while developing Agent Tools Runner.
 - When modifying an existing project file, inspect its current contents first.
 - Use the exact intended filename. Do not add suffixes such as `_updated`, `_new`, or `.v2`.
 - Briefly summarize what changed and why after each implementation step.
+- For release-scoped work, verify and update the application version and related version references before declaring the work complete; do not change the protocol version unless the protocol itself changes.
 
 ### Scope control
 
@@ -509,4 +513,4 @@ Record only durable, verified knowledge such as coding conventions, architecture
 
 Read and preserve the organization of an existing `AGENTS.md`, changing only the relevant section. Do not create one automatically when it is absent; propose it during planning and obtain approval first.
 
-After creating or changing a target repository's `AGENTS.md`, restart ATR and begin a new LLM conversation with the regenerated bootstrap prompt. ATR does not reload repository instructions during an active session.
+After creating or changing a target repository's `AGENTS.md`, run `/prompt` to reload it and copy a regenerated bootstrap prompt, then begin a new LLM conversation and paste that prompt. ATR does not need to restart, but the current LLM conversation retains its existing instructions.
