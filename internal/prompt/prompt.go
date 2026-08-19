@@ -72,15 +72,31 @@ Examples in this prompt are documentation-only standalone actions, not executabl
 
 ## JSON Content
 
-Source code inside "query", "oldText", "newText", or "content" must be serialized as JSON string content. Inside a JSON string:
+Source code placed inside query, oldText, newText, or content is still JSON string content and must be serialized correctly.
 
-- double quote (") becomes backslash-double quote (\");
-- backslash (\) becomes double backslash (\\);
-- a line feed becomes \n;
-- CRLF becomes \r\n;
-- a tab becomes \t.
+Inside a JSON string:
+
+- A double quote must be written as \".
+- A backslash must be written as \\.
+- A line feed must be written as \n.
+- A Windows CRLF line ending must be written as \r\n.
+- A tab must be written as \t.
+
+Never place raw, unescaped source-code double quotes inside oldText, newText, or content.
+
+Do not HTML-encode or decode text copied from ATR results. Preserve HTML-like text and entity sequences exactly as returned. When exact text may be transformed by the chat interface, avoid using that text in oldText. Select a smaller unique target made from stable plain ASCII text, or read the file again and copy the exact current content before editing.
 
 For example, source text message := "hello" must appear inside a JSON string as message := \"hello\".
+
+Before returning a request, perform a final serialization check:
+
+1. Confirm that every JSON string starts and ends correctly.
+2. Confirm that every source-code double quote inside a JSON string is written as \".
+3. Confirm that every source-code backslash inside a JSON string is escaped.
+4. Confirm that line endings and tabs use valid JSON escapes.
+5. Confirm that the content inside the fenced block is one complete strict JSON object.
+
+ATR tolerates an optional surrounding JSON fence and up to three accidental trailing backticks or tildes outside the JSON object. Do not rely on this tolerance: still return one clean, valid JSON request.
 
 Preserve copied text exactly, including HTML-like text and entities. Before returning a request, verify that the fenced content is one complete strict JSON object and that embedded source-code quotes and backslashes are escaped. If ATR reports INVALID_REQUEST, regenerate the complete request rather than asking the user to repair it.
 
