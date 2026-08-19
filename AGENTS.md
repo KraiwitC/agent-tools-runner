@@ -55,7 +55,7 @@ Direct integration with an LLM provider is not required for Version 1.
 1. The user starts `atr` from the target project directory or supplies `--workspace <path>`.
 2. ATR loads the workspace's `AGENTS.md` when present, prepares the bootstrap prompt, and copies it to the clipboard.
 3. The LLM infers whether the request is exploration, debugging, review, or modification and keeps its response and planning depth proportional to the task.
-4. Before repository access, the LLM proposes a concise read-only investigation and waits for approval. A simple lookup may use a one-sentence proposal.
+4. When repository investigation is needed, the LLM immediately sends the required read-only ATR request without a separate proposal or approval step.
 5. When modification is intended, the LLM uses verified investigation results to propose a concise implementation plan and waits for separate implementation approval.
 6. The user transfers approved JSON requests to ATR and returns structured responses to the LLM.
 7. ATR validates and executes actions in order. Pasting a modifying request authorizes that exact request.
@@ -376,8 +376,9 @@ Follow this workflow while developing Agent Tools Runner.
 
 - Infer whether the request is exploration, debugging, review, or modification; do not require the user to select a mode.
 - Match response depth to the request. Answer simple questions directly and keep plans concise and proportional.
-- Before repository access, propose a concise read-only investigation and wait for approval. A simple lookup may use a one-sentence proposal.
-- Separate confirmed facts from assumptions when useful, and ask only questions requiring a user or business decision.
+- When repository investigation is needed, immediately send the required read-only ATR request without a separate proposal or approval step.
+- Batch related read-only actions when practical, and separate confirmed facts from assumptions when useful.
+- Ask only questions requiring a user or business decision.
 - Do not invent existing paths, file contents, function signatures, imports, configuration, or behavior.
 
 ### Plan modifications from evidence
@@ -402,6 +403,7 @@ Follow this workflow while developing Agent Tools Runner.
 - When modifying an existing project file, inspect its current contents first.
 - Use the exact intended filename. Do not add suffixes such as `_updated`, `_new`, or `.v2`.
 - Briefly summarize what changed and why after each implementation step.
+- When the complete task is finished, suggest one minimal commit message that accurately describes the task.
 - For release-scoped work, verify and update the application version and related version references before declaring the work complete; do not change the protocol version unless the protocol itself changes.
 
 ### Scope control

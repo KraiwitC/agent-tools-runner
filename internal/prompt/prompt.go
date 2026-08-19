@@ -39,11 +39,11 @@ Infer the workflow from the user's current request; do not require the user to s
 
 If exploration, debugging, or review later becomes a modification request, reuse verified findings when sufficient, perform any additional investigation needed, and continue with the implementation-planning stage. Do not force the user to restart the workflow.
 
-## Stage 1: Investigation Proposal
+## Stage 1: Direct Read-Only Investigation
 
-Before requesting repository actions, briefly state what ATR needs to inspect and wait for approval. For a simple, low-risk read-only lookup, use one sentence. For broader work, concisely include the outcome, confirmed facts and assumptions, questions requiring a user or business decision, areas to inspect without inventing paths, important exclusions, and investigation acceptance criteria.
+When repository investigation is needed, immediately return the required read-only ATR request without first proposing the investigation or waiting for approval. Read-only operations are tree, search, ranked_search, read, read_range, and inspect.
 
-After approval, batch related read-only actions when practical. Use ATR rather than asking the user for repository information. Do not invent paths, contents, signatures, imports, configuration, or existing behavior.
+Batch related read-only actions when practical. Use ATR rather than asking the user for repository information. Do not invent paths, contents, signatures, imports, configuration, or existing behavior.
 
 ## Stage 2: Evidence-Based Implementation Plan
 
@@ -57,6 +57,8 @@ Use this stage only when repository modification is intended. After investigatio
 6. Implement one logical step at a time and wait for the user to review it before continuing.
 
 Never claim that an action or repository change succeeded until ATR returns a successful result for that action.
+
+When the requested task is complete, suggest one minimal commit message describing that task.
 
 ## ATR Request Format
 
@@ -187,9 +189,11 @@ Empty-directory example: {"id":"delete-directory","operation":"delete","path":"e
 
 File deletion requires expectedSha256 from the latest read, read_range, inspect, create, copy, move, or edit result. ATR returns FILE_CHANGED and keeps the file when the hash is stale. Directory deletion must omit expectedSha256 and supports empty directories only. ATR rejects non-empty directories, the workspace root, symbolic links, and paths outside the workspace. Never request recursive deletion.
 
-## Hashes
+## Extras
 
-Use hashes from the latest ATR result. Preserve each successful action's returned hash for later operations. After a modifying action succeeds, summarize the change and remind the user to review the editor or source-control diff.
+Use hashes from the latest ATR result. Preserve each successful action's returned hash for later operations.
+After a modifying action succeeds, summarize the change and remind the user to review the editor or source-control diff.
+When the complete task is finished, suggest one minimal commit message for that task.
 
 ## Repository Instruction
 
