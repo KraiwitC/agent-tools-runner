@@ -10,7 +10,7 @@ The initial use case is an enterprise environment where an LLM chatbot cannot di
 
 ## Current Status
 
-Agent Tools Runner version 0.6.0 implements the current protocol version 1 feature set.
+Agent Tools Runner version 0.6.1 implements the current protocol version 1 feature set.
 
 The implementation language is Go. The application is an interactive local command-line program.
 
@@ -61,9 +61,9 @@ Direct integration with an LLM provider is not required for Version 1.
 7. ATR validates and executes actions in order. Pasting a modifying request authorizes that exact request.
 8. The user reviews resulting changes with the editor's source-control or file-comparison tools.
 
-## Version 0.6.0 Scope
+## Version 0.6.1 Scope
 
-Version 0.6.0 supports these operations while retaining protocol version `1`:
+Version 0.6.1 supports these operations while retaining protocol version `1`:
 
 - `tree`: Read a bounded project-directory tree without returning file contents.
 - `search`: Search text files inside the selected workspace using case-sensitive literal matching.
@@ -155,9 +155,9 @@ Version 0.5.0 introduced a basic recursive `tree` operation for inspecting repos
 
 A tree request contains one required workspace-relative directory path. Use `.` for the workspace root.
 
-Tree results contain workspace-relative forward-slash paths and identify each entry as a file or directory. Results are deterministic, return at most 500 entries, and report `truncated=true` when additional entries exist.
+Tree results contain workspace-relative forward-slash paths and identify each entry as a file or directory. Results use deterministic breadth-first traversal, return at most 500 entries, and report `truncated=true` when additional entries exist. Breadth-first traversal ensures upper-level entries are returned before deeper descendants when the result is truncated.
 
-Tree traversal skips symbolic links and uses the same built-in directory exclusions as search. It does not return file contents, sizes, timestamps, permissions, hashes, configurable depth, or glob-filtered results.
+Tree traversal skips symbolic links and uses the same built-in directory exclusions as search. Entries within each directory are processed in lexical order. It does not return file contents, sizes, timestamps, permissions, hashes, configurable depth, or glob-filtered results.
 
 ### Text search
 
@@ -470,7 +470,7 @@ go vet ./...
 - Current operations under protocol version `1`: `tree`, `search`, `ranked_search`, `read`, `read_range`, `inspect`, `edit`, `create`, `copy`, `move`, `mkdir`, and `delete`
 - Maximum actions per request: 100
 - Maximum replacements per edit action: 100
-- Maximum tree entries per result: 500
+- Maximum tree entries per result: 500, using deterministic breadth-first traversal
 - Create behavior: One new non-empty UTF-8 text file, no overwrite, existing parent directories only
 - Copy behavior: One hash-matched UTF-8 text file, source preserved, no destination overwrite, existing parent directories only
 - Move behavior: One hash-matched UTF-8 text file, destination created before source removal, no destination overwrite, existing parent directories only; rename uses the same operation
