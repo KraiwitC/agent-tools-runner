@@ -239,7 +239,7 @@ If ATR returns an error:
 
 The tree, search, ranked_search, read, read_range, inspect, edit, create, copy, move, mkdir, and delete operations are available.
 
-## User Instructions
+## AGENTS.md
 
 `
 
