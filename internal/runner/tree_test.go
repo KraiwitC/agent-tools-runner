@@ -30,11 +30,33 @@ func TestExecuteTreeActionReturnsSortedProjectEntries(t *testing.T) {
 	expected := []TreeEntry{
 		{Path: "a-first.txt", Type: "file"},
 		{Path: "nested", Type: "directory"},
+		{Path: "z-last.txt", Type: "file"},
 		{Path: "nested/a.txt", Type: "file"},
 		{Path: "nested/b.txt", Type: "file"},
-		{Path: "z-last.txt", Type: "file"},
 	}
 	assertTreeEntries(t, entries, expected)
+}
+
+func TestExecuteTreeActionReturnsUpperLevelEntriesBeforeDeepDescendants(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "a-first/deeper/file.txt", "deep")
+	writeTestFile(t, workspace, "z-last/file.txt", "upper")
+	action := Action{ID: "project-tree", Operation: "tree", Path: "."}
+
+	entries, _, truncated, responseError := executeTreeAction(workspace, action, 0)
+	if responseError != nil {
+		t.Fatalf("executeTreeAction returned an error: %#v", responseError)
+	}
+	if truncated {
+		t.Fatal("did not expect tree result to be truncated")
+	}
+	assertTreeEntries(t, entries, []TreeEntry{
+		{Path: "a-first", Type: "directory"},
+		{Path: "z-last", Type: "directory"},
+		{Path: "a-first/deeper", Type: "directory"},
+		{Path: "z-last/file.txt", Type: "file"},
+		{Path: "a-first/deeper/file.txt", Type: "file"},
+	})
 }
 
 func TestExecuteTreeActionReadsRequestedSubdirectory(t *testing.T) {
@@ -163,6 +185,32 @@ func TestExecuteTreeActionRejectsWindowsVolumeQualifiedPath(t *testing.T) {
 
 	_, _, _, responseError := executeTreeAction(workspace, action, 0)
 	assertResponseErrorCode(t, responseError, "PATH_OUTSIDE_WORKSPACE")
+}
+
+func TestExecuteTreeActionKeepsLaterUpperLevelDirectoryWhenDeepTreeExceedsLimit(t *testing.T) {
+	workspace := t.TempDir()
+	for index := 0; index < maximumTreeEntries; index++ {
+		writeTestFile(t, workspace, fmt.Sprintf("a-deep/file-%03d.txt", index), "content")
+	}
+	writeTestFile(t, workspace, "z-upper/file.txt", "upper")
+	action := Action{ID: "project-tree", Operation: "tree", Path: "."}
+
+	entries, _, truncated, responseError := executeTreeAction(workspace, action, 0)
+	if responseError != nil {
+		t.Fatalf("executeTreeAction returned an error: %#v", responseError)
+	}
+	if !truncated {
+		t.Fatal("expected tree result to be truncated")
+	}
+	if len(entries) != maximumTreeEntries {
+		t.Fatalf("expected %d entries, got %d", maximumTreeEntries, len(entries))
+	}
+	if entries[0] != (TreeEntry{Path: "a-deep", Type: "directory"}) {
+		t.Fatalf("expected first upper-level directory, got %#v", entries[0])
+	}
+	if entries[1] != (TreeEntry{Path: "z-upper", Type: "directory"}) {
+		t.Fatalf("expected later upper-level directory before deep entries, got %#v", entries[1])
+	}
 }
 
 func TestExecuteTreeActionTruncatesAtLimit(t *testing.T) {

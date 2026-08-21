@@ -2,15 +2,12 @@ package runner
 
 import (
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 const maximumTreeEntries = 500
-
-var errTreeLimitReached = errors.New("tree entry limit reached")
 
 func executeTreeAction(workspace string, action Action, actionIndex int) ([]TreeEntry, string, bool, *ResponseError) {
 	resolvedPath, relativePath, err := resolveWorkspaceDirectory(workspace, action.Path)
@@ -109,55 +106,49 @@ func resolveWorkspaceDirectory(workspace string, requestedPath string) (string, 
 
 func readWorkspaceTree(workspace string, root string) ([]TreeEntry, bool, error) {
 	entries := make([]TreeEntry, 0)
-	truncated := false
+	directoryQueue := []string{root}
 
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == root {
-			return nil
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if entry.IsDir() && isSearchExcludedDirectory(entry.Name()) {
-			return filepath.SkipDir
-		}
-		if !entry.IsDir() && !entry.Type().IsRegular() {
-			return nil
-		}
+	for len(directoryQueue) > 0 {
+		currentDirectory := directoryQueue[0]
+		directoryQueue = directoryQueue[1:]
 
-		if len(entries) >= maximumTreeEntries {
-			truncated = true
-			return errTreeLimitReached
-		}
-
-		relativePath, err := filepath.Rel(workspace, path)
+		directoryEntries, err := os.ReadDir(currentDirectory)
 		if err != nil {
-			return err
+			return entries, false, err
 		}
 
-		entryType := "file"
-		if entry.IsDir() {
-			entryType = "directory"
+		for _, entry := range directoryEntries {
+			if entry.Type()&os.ModeSymlink != 0 {
+				continue
+			}
+			if entry.IsDir() && isSearchExcludedDirectory(entry.Name()) {
+				continue
+			}
+			if !entry.IsDir() && !entry.Type().IsRegular() {
+				continue
+			}
+
+			if len(entries) >= maximumTreeEntries {
+				return entries, true, nil
+			}
+
+			path := filepath.Join(currentDirectory, entry.Name())
+			relativePath, err := filepath.Rel(workspace, path)
+			if err != nil {
+				return entries, false, err
+			}
+
+			entryType := "file"
+			if entry.IsDir() {
+				entryType = "directory"
+				directoryQueue = append(directoryQueue, path)
+			}
+			entries = append(entries, TreeEntry{
+				Path: filepath.ToSlash(relativePath),
+				Type: entryType,
+			})
 		}
-		entries = append(entries, TreeEntry{
-			Path: filepath.ToSlash(relativePath),
-			Type: entryType,
-		})
-
-		return nil
-	})
-	if errors.Is(err, errTreeLimitReached) {
-		return entries, truncated, nil
-	}
-	if err != nil {
-		return entries, truncated, err
 	}
 
-	return entries, truncated, nil
+	return entries, false, nil
 }

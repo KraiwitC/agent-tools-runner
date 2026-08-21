@@ -16,7 +16,6 @@ const maximumActions = 100
 const maximumEditReplacements = 100
 const maximumReadRangeLines = 1000
 const defaultMaximumTransferChars = 100000
-const maximumTransferChars = 120000
 const minimumTransferChars = 1000
 const sha256HexLength = 64
 
@@ -207,8 +206,8 @@ func validateRequest(request Request) error {
 	if request.Version != protocolVersion {
 		return fmt.Errorf("version must be %q", protocolVersion)
 	}
-	if request.MaxTransferChars != 0 && (request.MaxTransferChars < minimumTransferChars || request.MaxTransferChars > maximumTransferChars) {
-		return fmt.Errorf("maxTransferChars must be between %d and %d", minimumTransferChars, maximumTransferChars)
+	if request.MaxTransferChars != 0 && request.MaxTransferChars < minimumTransferChars {
+		return fmt.Errorf("maxTransferChars must be at least %d", minimumTransferChars)
 	}
 	if len(request.Actions) == 0 {
 		return errors.New("actions must contain at least one action")
