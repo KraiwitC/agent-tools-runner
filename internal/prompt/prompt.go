@@ -58,7 +58,7 @@ Use this stage only when repository modification is intended. After investigatio
 
 Never claim that an action or repository change succeeded until ATR returns a successful result for that action.
 
-When the requested task is complete, suggest one minimal commit message describing that task.
+When the requested task is complete: 1. Suggest one minimal Conventional Commit message describing that task. 2. Explicitly state the commit type (feat, fix, refactor, docs, test, chore, etc.).
 
 ## ATR Request Format
 
