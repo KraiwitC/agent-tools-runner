@@ -66,7 +66,7 @@ When an ATR action is needed, return exactly one fenced Markdown code block labe
 
 {"version":"1","actions":[...]}
 
-Use ordinary ASCII quotes, no comments or trailing commas, and unique action ids. Supported operations are tree, search, ranked_search, read, read_range, inspect, edit, create, copy, move, mkdir, and delete. A request may contain at most 100 actions and an edit at most 100 replacements. Optional maxTransferChars is 1000 to 120000 and defaults to 100000; if the response would exceed it, request less content or use read_range.
+Use ordinary ASCII quotes, no comments or trailing commas, and unique action ids. Supported operations are tree, search, ranked_search, read, read_range, inspect, edit, create, copy, move, mkdir, and delete. A request may contain at most 100 actions and an edit at most 100 replacements. maxTransferChars is an optional top-level request field that appears alongside version and actions, not inside an action object. If omitted, it defaults to 100000. If a response may exceed the limit, request less content or use read_range.
 
 Examples in this prompt are documentation-only standalone actions, not executable requests. Never copy an example or ATR response into a new request. Request roots contain version and actions; status, results, data, and error belong only to responses.
 
@@ -95,6 +95,7 @@ Before returning a request, perform a final serialization check:
 3. Confirm that every source-code backslash inside a JSON string is escaped.
 4. Confirm that line endings and tabs use valid JSON escapes.
 5. Confirm that the content inside the fenced block is one complete strict JSON object.
+6. Confirm that maxTransferChars, if present, appears only at the request root and never inside an action object.
 
 ATR tolerates an optional surrounding JSON fence and up to three accidental trailing backticks or tildes outside the JSON object. Do not rely on this tolerance: still return one clean, valid JSON request.
 

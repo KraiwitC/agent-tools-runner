@@ -64,28 +64,27 @@ func TestParseAndValidateRequestRejectsTransferLimitBelowMinimum(t *testing.T) {
 	}
 }
 
-func TestParseAndValidateRequestRejectsTransferLimitAboveMaximum(t *testing.T) {
-	requestText := `{"version":"1","maxTransferChars":120001,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
+func TestParseAndValidateRequestAcceptsLargeTransferLimit(t *testing.T) {
+	requestText := `{"version":"1","maxTransferChars":5000000,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
 
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected transfer-limit validation error")
+	request, err := ParseAndValidateRequest(requestText)
+	if err != nil {
+		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
+	}
+	if request.MaxTransferChars != 5000000 {
+		t.Fatalf("expected maxTransferChars 5000000, got %d", request.MaxTransferChars)
 	}
 }
 
-func TestParseAndValidateRequestAcceptsTransferLimitBounds(t *testing.T) {
-	for _, limit := range []int{minimumTransferChars, maximumTransferChars} {
-		t.Run(fmt.Sprintf("limit-%d", limit), func(t *testing.T) {
-			requestText := fmt.Sprintf(`{"version":"1","maxTransferChars":%d,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`, limit)
+func TestParseAndValidateRequestAcceptsTransferLimitMinimum(t *testing.T) {
+	requestText := fmt.Sprintf(`{"version":"1","maxTransferChars":%d,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`, minimumTransferChars)
 
-			request, err := ParseAndValidateRequest(requestText)
-			if err != nil {
-				t.Fatalf("parseAndValidateRequest returned an error: %v", err)
-			}
-			if request.MaxTransferChars != limit {
-				t.Fatalf("expected maxTransferChars %d, got %d", limit, request.MaxTransferChars)
-			}
-		})
+	request, err := ParseAndValidateRequest(requestText)
+	if err != nil {
+		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
+	}
+	if request.MaxTransferChars != minimumTransferChars {
+		t.Fatalf("expected maxTransferChars %d, got %d", minimumTransferChars, request.MaxTransferChars)
 	}
 }
 
