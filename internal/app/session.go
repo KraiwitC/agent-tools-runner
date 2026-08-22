@@ -73,6 +73,9 @@ func (t *terminalLineReader) Scan() bool {
 		}
 
 		if r == '\r' {
+			if peek, err := t.reader.Peek(1); err == nil && len(peek) > 0 && peek[0] == '\n' {
+				_, _ = t.reader.ReadByte()
+			}
 			fmt.Println()
 			t.line = string(lineRunes)
 			return true
@@ -227,6 +230,8 @@ func handleCommand(command string, workspace string, lastResponse string, clipbo
 		fmt.Println(workspace)
 	case "/clear":
 		fmt.Print("\033[H\033[2J")
+	case "/cancel":
+		fmt.Println("No active JSON request to cancel.")
 	case "/exit":
 		shouldExit = true
 	default:
