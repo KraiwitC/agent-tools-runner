@@ -379,7 +379,7 @@ func TestParseAndValidateRequestAcceptsTildeFencedJSON(t *testing.T) {
 }
 
 func TestParseAndValidateRequestAcceptsTrailingBacktickArtifacts(t *testing.T) {
-	for _, suffix := range []string{"`", "``", "```"} {
+	for _, suffix := range []string{"`", "``", "```", "\n```", "\n```json", "\n~~~", "\n~~~json"} {
 		t.Run(suffix, func(t *testing.T) {
 			requestText := "{\"version\":\"1\",\"actions\":[{\"id\":\"find\",\"operation\":\"search\",\"query\":\"needle\"}]}" + suffix
 

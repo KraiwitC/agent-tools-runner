@@ -229,6 +229,13 @@ func similarityScore(first string, second string) float64 {
 	if maximumLength == 0 {
 		return 1
 	}
+	lengthDiff := len(firstRunes) - len(secondRunes)
+	if lengthDiff < 0 {
+		lengthDiff = -lengthDiff
+	}
+	if float64(lengthDiff)/float64(maximumLength) > 0.25 {
+		return 0
+	}
 	distance := levenshteinDistance(firstRunes, secondRunes)
 	return 1 - float64(distance)/float64(maximumLength)
 }

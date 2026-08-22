@@ -146,6 +146,16 @@ func removeTrailingFenceArtifact(input string) string {
 	if len(trimmedInput) == 0 {
 		return trimmedInput
 	}
+	if lineEnd := strings.LastIndexByte(trimmedInput, '\n'); lineEnd >= 0 {
+		lastLine := strings.TrimSpace(strings.TrimSuffix(trimmedInput[lineEnd+1:], "\r"))
+		lowerLastLine := strings.ToLower(lastLine)
+		if lowerLastLine == "```" || lowerLastLine == "```json" || lowerLastLine == "~~~" || lowerLastLine == "~~~json" {
+			withoutFence := strings.TrimSpace(trimmedInput[:lineEnd])
+			if strings.HasSuffix(withoutFence, "}") {
+				return withoutFence
+			}
+		}
+	}
 	fenceCharacter := trimmedInput[len(trimmedInput)-1]
 	if fenceCharacter != '`' && fenceCharacter != '~' {
 		return trimmedInput
