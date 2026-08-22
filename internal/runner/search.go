@@ -26,6 +26,22 @@ var defaultSearchExcludedDirectories = map[string]struct{}{
 	"build":        {},
 	"dist":         {},
 	"vendor":       {},
+	".gradle":      {},
+	".m2":          {},
+	".mvn":         {},
+	"out":          {},
+	"bin":          {},
+	".metadata":    {},
+	".settings":    {},
+	".venv":        {},
+	"venv":         {},
+	"__pycache__":  {},
+	".next":        {},
+	".turbo":       {},
+	".cache":       {},
+	"coverage":     {},
+	".output":      {},
+	".terraform":   {},
 }
 
 var errSearchLimitReached = errors.New("search match limit reached")
