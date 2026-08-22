@@ -9,6 +9,7 @@ import (
 )
 
 const AgentsFileName = "AGENTS.md"
+const PlanFileName = "PLAN.md"
 const bootstrapInstructions = `# Agent Tools Runner Instructions
 
 ## Identity and Protocol
@@ -138,8 +139,6 @@ AGENTS.md stores durable project-specific guidance. Record only verified, long-l
 
 When a task is complete, suggest one minimal Conventional Commit message with an explicit type (feat, fix, refactor, docs, test, chore, etc.).
 
-## AGENTS.md
-
 `
 
 func Create(workspace string) (string, bool, error) {
@@ -147,7 +146,11 @@ func Create(workspace string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	prompt := buildBootstrapPrompt(repositoryInstructions, agentsFileFound)
+	taskPlan, planFileFound, err := readTaskPlan(workspace)
+	if err != nil {
+		return "", false, err
+	}
+	prompt := buildBootstrapPrompt(repositoryInstructions, agentsFileFound, taskPlan, planFileFound)
 	return prompt, agentsFileFound, nil
 }
 
@@ -163,16 +166,36 @@ func readRepositoryInstructions(workspace string) (string, bool, error) {
 	return string(content), true, nil
 }
 
-func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool) string {
+func readTaskPlan(workspace string) (string, bool, error) {
+	planPath := filepath.Join(workspace, PlanFileName)
+	content, err := os.ReadFile(planPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("read %s: %w", PlanFileName, err)
+	}
+	return string(content), true, nil
+}
+
+func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, taskPlan string, planFileFound bool) string {
 	var prompt strings.Builder
 	prompt.WriteString(bootstrapInstructions)
 	if agentsFileFound {
+		prompt.WriteString("## Project Guidelines (" + AgentsFileName + ")\n\n")
 		prompt.WriteString(repositoryInstructions)
 		if !strings.HasSuffix(repositoryInstructions, "\n") {
 			prompt.WriteString("\n")
 		}
 	} else {
 		prompt.WriteString("No " + AgentsFileName + " file was found in the selected workspace.\n")
+	}
+	if planFileFound {
+		prompt.WriteString("\n## Active Task Plan (" + PlanFileName + ")\n\n")
+		prompt.WriteString(taskPlan)
+		if !strings.HasSuffix(taskPlan, "\n") {
+			prompt.WriteString("\n")
+		}
 	}
 	prompt.WriteString("\n## User Instructions\n\n")
 	return prompt.String()
