@@ -8,7 +8,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -42,9 +45,7 @@ func executeSearchAction(workspace string, action Action, actionIndex int) ([]Se
 }
 
 func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error) {
-	matches := make([]SearchMatch, 0)
-	truncated := false
-
+	var files []string
 	err := filepath.WalkDir(workspace, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -67,28 +68,62 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 		if !entry.Type().IsRegular() {
 			return nil
 		}
-
-		fileMatches, err := searchFile(workspace, path, query, maximumSearchMatches+1-len(matches))
-		if err != nil {
-			return nil
-		}
-		matches = append(matches, fileMatches...)
-		if len(matches) > maximumSearchMatches {
-			matches = matches[:maximumSearchMatches]
-			truncated = true
-			return errSearchLimitReached
-		}
-
+		files = append(files, path)
 		return nil
 	})
-	if errors.Is(err, errSearchLimitReached) {
-		return matches, truncated, nil
-	}
 	if err != nil {
-		return matches, truncated, err
+		return nil, false, err
 	}
 
-	return matches, truncated, nil
+	if len(files) == 0 {
+		return []SearchMatch{}, false, nil
+	}
+
+	workerCount := runtime.NumCPU()
+	if workerCount > len(files) {
+		workerCount = len(files)
+	}
+
+	jobs := make(chan string, len(files))
+	for _, file := range files {
+		jobs <- file
+	}
+	close(jobs)
+
+	var mu sync.Mutex
+	var allMatches []SearchMatch
+	var wg sync.WaitGroup
+
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range jobs {
+				fileMatches, err := searchFile(workspace, path, query, maximumSearchMatches+1)
+				if err != nil || len(fileMatches) == 0 {
+					continue
+				}
+				mu.Lock()
+				allMatches = append(allMatches, fileMatches...)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	sort.Slice(allMatches, func(i, j int) bool {
+		if allMatches[i].Path != allMatches[j].Path {
+			return allMatches[i].Path < allMatches[j].Path
+		}
+		return allMatches[i].Line < allMatches[j].Line
+	})
+
+	truncated := len(allMatches) > maximumSearchMatches
+	if truncated {
+		allMatches = allMatches[:maximumSearchMatches]
+	}
+
+	return allMatches, truncated, nil
 }
 
 func searchFile(workspace string, path string, query string, remainingMatches int) ([]SearchMatch, error) {

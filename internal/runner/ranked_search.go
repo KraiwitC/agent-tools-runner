@@ -8,8 +8,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 )
@@ -34,7 +36,7 @@ func executeRankedSearchAction(workspace string, action Action, actionIndex int)
 }
 
 func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch, bool, error) {
-	matches := make([]RankedSearchMatch, 0)
+	var files []string
 	err := filepath.WalkDir(workspace, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -57,17 +59,48 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 		if !entry.Type().IsRegular() {
 			return nil
 		}
-
-		fileMatches, err := rankedSearchFile(workspace, path, query)
-		if err != nil {
-			return nil
-		}
-		matches = append(matches, fileMatches...)
+		files = append(files, path)
 		return nil
 	})
 	if err != nil {
-		return matches, false, err
+		return nil, false, err
 	}
+
+	if len(files) == 0 {
+		return []RankedSearchMatch{}, false, nil
+	}
+
+	workerCount := runtime.NumCPU()
+	if workerCount > len(files) {
+		workerCount = len(files)
+	}
+
+	jobs := make(chan string, len(files))
+	for _, file := range files {
+		jobs <- file
+	}
+	close(jobs)
+
+	var mu sync.Mutex
+	var matches []RankedSearchMatch
+	var wg sync.WaitGroup
+
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range jobs {
+				fileMatches, err := rankedSearchFile(workspace, path, query)
+				if err != nil || len(fileMatches) == 0 {
+					continue
+				}
+				mu.Lock()
+				matches = append(matches, fileMatches...)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
 
 	sort.Slice(matches, func(first int, second int) bool {
 		if matches[first].Score != matches[second].Score {
