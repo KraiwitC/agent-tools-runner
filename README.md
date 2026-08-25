@@ -1,6 +1,6 @@
 # Agent Tools Runner
 
-Agent Tools Runner (`atr`) is a human-in-the-loop harness that turns any chat-only LLM into a coding agent for your local workspace.
+Agent Tools Runner (`atr`) is a human-in-the-loop agent harness that turns any chat-only LLM into a coding agent for your local workspace.
 
 ## Supported operations
 
@@ -16,10 +16,6 @@ Agent Tools Runner (`atr`) is a human-in-the-loop harness that turns any chat-on
 - `move`: Move or rename a hash-matched UTF-8 text file without overwriting the destination.
 - `mkdir`: Create one directory whose parent already exists.
 - `delete`: Delete a hash-matched file or an empty directory.
-
-## Requirements
-
-- Go 1.26.5 or later
 
 ## Download dependencies
 
