@@ -42,6 +42,7 @@ build/
 # Temporary files
 tmp/
 temp/
+PLAN.md
 
 # Delve debugger
 __debug_bin
