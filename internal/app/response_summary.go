@@ -15,6 +15,7 @@ func summarizeResponse(responseText string) (string, error) {
 	}
 
 	var summary strings.Builder
+	summary.WriteString("\n")
 	summary.WriteString(strings.ToUpper(response.Status))
 	if len(response.Results) > 0 || response.Error != nil {
 		summary.WriteString("\n")

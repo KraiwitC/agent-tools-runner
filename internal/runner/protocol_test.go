@@ -284,8 +284,11 @@ func TestExecuteRequestRejectsOversizedActionResult(t *testing.T) {
 	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if response.Status != "error" || response.Error == nil || response.Error.Code != "TRANSFER_LIMIT_EXCEEDED" {
+	if response.Status != "limit" || response.Error == nil || response.Error.Code != "TRANSFER_LIMIT_EXCEEDED" {
 		t.Fatalf("unexpected transfer-limit response: %#v", response)
+	}
+	if !strings.Contains(response.Error.Message, "maxTransferChars") {
+		t.Fatalf("expected maxTransferChars guidance, got %q", response.Error.Message)
 	}
 	if len(response.Results) != 1 || response.Results[0].Status != "error" || response.Results[0].Data != nil {
 		t.Fatalf("unexpected transfer-limit action result: %#v", response.Results)

@@ -414,12 +414,12 @@ func ExecuteRequest(workspace string, request Request) string {
 				Operation: action.Operation,
 				Status:    "error",
 			}
-			response.Status = "error"
+			response.Status = "limit"
 			response.Error = &ResponseError{
 				ActionID:    action.ID,
 				ActionIndex: actionIndex,
 				Code:        "TRANSFER_LIMIT_EXCEEDED",
-				Message:     "The action result exceeds maxTransferChars. Request less content or use a smaller range.",
+				Message:     "Response capped by maxTransferChars. maxTransferChars is the maximum number of characters ATR may return in a single response paste.",
 			}
 			break
 		}
@@ -492,11 +492,11 @@ func truncateReadOnlyResult(result ActionResult, itemCount int) ActionResult {
 func createTransferLimitErrorResponse(maxTransferChars int) string {
 	response := Response{
 		Version: protocolVersion,
-		Status:  "error",
+		Status:  "limit",
 		Results: []ActionResult{},
 		Error: &ResponseError{
 			Code:    "TRANSFER_LIMIT_EXCEEDED",
-			Message: fmt.Sprintf("The response exceeds the %d character transfer limit.", maxTransferChars),
+			Message: fmt.Sprintf("Response capped by maxTransferChars (%d characters).", maxTransferChars),
 		},
 	}
 	return marshalResponse(response)

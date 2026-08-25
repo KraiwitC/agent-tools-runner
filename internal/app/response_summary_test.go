@@ -78,7 +78,7 @@ func TestSummarizeResponseFormatsSuccessfulActions(t *testing.T) {
 		t.Fatalf("summarizeResponse returned an error: %v", err)
 	}
 
-	expected := "SUCCESS\n\n" +
+	expected := "\nSUCCESS\n\n" +
 		"  EDIT      abc.py (2 replacements)\n" +
 		"  CREATE    config.yaml (154 bytes)\n" +
 		"  COPY      copied.yaml (154 bytes)\n" +
@@ -157,7 +157,7 @@ func TestSummarizeResponseFormatsReadSearchTreeAndRange(t *testing.T) {
 		t.Fatalf("summarizeResponse returned an error: %v", err)
 	}
 
-	expected := "SUCCESS\n\n" +
+	expected := "\nSUCCESS\n\n" +
 		"  READ      2 files\n" +
 		"  SEARCH    \"needle\" (1 match), truncated\n" +
 		"  R_SEARCH  \"executeMoveActions\" (1 match)\n" +
@@ -205,7 +205,7 @@ func TestSummarizeResponseFormatsEarlierSuccessAndFailedAction(t *testing.T) {
 		t.Fatalf("summarizeResponse returned an error: %v", err)
 	}
 
-	expected := "ERROR\n\n" +
+	expected := "\nERROR\n\n" +
 		"  READ      abc.py\n" +
 		"  EDIT      asdf.txt [ERROR]\n" +
 		"            FILE_CHANGED: File content does not match expectedSha256."
@@ -231,7 +231,7 @@ func TestSummarizeResponseFormatsRequestErrorWithoutActionResults(t *testing.T) 
 		t.Fatalf("summarizeResponse returned an error: %v", err)
 	}
 
-	expected := "ERROR\n\n  INVALID_REQUEST: actions must contain at least one action"
+	expected := "\nERROR\n\n  INVALID_REQUEST: actions must contain at least one action"
 	if summary != expected {
 		t.Fatalf("unexpected summary: %q", summary)
 	}
