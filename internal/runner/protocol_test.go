@@ -420,3 +420,153 @@ func TestParseAndValidateRequestRejectsMultipleObjects(t *testing.T) {
 		t.Fatal("expected multiple JSON objects to be rejected")
 	}
 }
+
+func TestExecuteRequestReturnsMoreReadOnlyItemsWhenTransferBudgetAllows(t *testing.T) {
+	workspace := t.TempDir()
+	var content strings.Builder
+	for index := 0; index < 150; index++ {
+		fmt.Fprintf(&content, "needle executeMoveAction %03d\n", index)
+		writeTestFile(t, workspace, fmt.Sprintf("tree/file-%03d.txt", index), "content")
+	}
+	writeTestFile(t, workspace, "matches.txt", content.String())
+
+	tests := []struct {
+		name         string
+		action       Action
+		minimumItems int
+		resultItems  func(*ActionData) int
+	}{
+		{
+			name:         "tree",
+			action:       Action{ID: "tree", Operation: "tree", Path: "."},
+			minimumItems: 151,
+			resultItems:  func(data *ActionData) int { return len(data.Entries) },
+		},
+		{
+			name:         "search",
+			action:       Action{ID: "search", Operation: "search", Query: "needle"},
+			minimumItems: 150,
+			resultItems:  func(data *ActionData) int { return len(data.Matches) },
+		},
+		{
+			name:         "ranked_search",
+			action:       Action{ID: "ranked", Operation: "ranked_search", Query: "executeMoveAction"},
+			minimumItems: 150,
+			resultItems:  func(data *ActionData) int { return len(data.RankedMatches) },
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := Request{
+				Version:          protocolVersion,
+				MaxTransferChars: 500000,
+				Actions:          []Action{test.action},
+			}
+
+			response := executeRequestForTest(t, workspace, request)
+			if response.Status != "success" || len(response.Results) != 1 || response.Results[0].Data == nil {
+				t.Fatalf("unexpected response: %#v", response)
+			}
+			if response.Results[0].Data.Truncated {
+				t.Fatal("did not expect result to be truncated")
+			}
+			if itemCount := test.resultItems(response.Results[0].Data); itemCount < test.minimumItems {
+				t.Fatalf("items = %d, want at least %d", itemCount, test.minimumItems)
+			}
+		})
+	}
+}
+
+func TestExecuteRequestTruncatesReadOnlyItemsToTransferBudget(t *testing.T) {
+	workspace := t.TempDir()
+	var content strings.Builder
+	for index := 0; index < 200; index++ {
+		fmt.Fprintf(&content, "needle result with enough text to consume transfer space %03d\n", index)
+	}
+	writeTestFile(t, workspace, "many.txt", content.String())
+	request := Request{
+		Version:          protocolVersion,
+		MaxTransferChars: minimumTransferChars,
+		Actions: []Action{
+			{ID: "search", Operation: "search", Query: "needle"},
+		},
+	}
+
+	responseText := ExecuteRequest(workspace, request)
+	if len(responseText) > minimumTransferChars {
+		t.Fatalf("response length = %d, want at most %d", len(responseText), minimumTransferChars)
+	}
+	var response Response
+	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Status != "success" || len(response.Results) != 1 || response.Results[0].Data == nil {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	data := response.Results[0].Data
+	if !data.Truncated {
+		t.Fatal("expected transfer-budget truncation")
+	}
+	if len(data.Matches) == 0 || len(data.Matches) >= 200 {
+		t.Fatalf("matches = %d, want a non-empty truncated result", len(data.Matches))
+	}
+	for index, match := range data.Matches {
+		if match.Line != index+1 {
+			t.Fatalf("match %d line = %d, want %d", index, match.Line, index+1)
+		}
+	}
+}
+
+func TestExecuteRequestUsesRemainingTransferBudgetForLaterReadOnlyAction(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "first.txt", strings.Repeat("a", 400))
+	var content strings.Builder
+	for index := 0; index < 100; index++ {
+		fmt.Fprintf(&content, "needle result %03d with additional transfer content\n", index)
+	}
+	writeTestFile(t, workspace, "many.txt", content.String())
+
+	searchAction := Action{ID: "search", Operation: "search", Query: "needle"}
+	searchOnly := executeRequestForTest(t, workspace, Request{
+		Version:          protocolVersion,
+		MaxTransferChars: 2000,
+		Actions:          []Action{searchAction},
+	})
+	withPriorResult := executeRequestForTest(t, workspace, Request{
+		Version:          protocolVersion,
+		MaxTransferChars: 2000,
+		Actions: []Action{
+			{ID: "read", Operation: "read", Paths: []string{"first.txt"}},
+			searchAction,
+		},
+	})
+
+	if searchOnly.Status != "success" || len(searchOnly.Results) != 1 || searchOnly.Results[0].Data == nil {
+		t.Fatalf("unexpected search-only response: %#v", searchOnly)
+	}
+	if withPriorResult.Status != "success" || len(withPriorResult.Results) != 2 || withPriorResult.Results[1].Data == nil {
+		t.Fatalf("unexpected multi-action response: %#v", withPriorResult)
+	}
+	searchOnlyMatches := len(searchOnly.Results[0].Data.Matches)
+	laterMatches := len(withPriorResult.Results[1].Data.Matches)
+	if laterMatches >= searchOnlyMatches {
+		t.Fatalf("later action matches = %d, want fewer than search-only matches %d", laterMatches, searchOnlyMatches)
+	}
+	if !withPriorResult.Results[1].Data.Truncated {
+		t.Fatal("expected later search result to be truncated")
+	}
+}
+
+func executeRequestForTest(t *testing.T, workspace string, request Request) Response {
+	t.Helper()
+	responseText := ExecuteRequest(workspace, request)
+	if len(responseText) > effectiveMaximumTransferChars(request.MaxTransferChars) {
+		t.Fatalf("response length = %d, want at most %d", len(responseText), effectiveMaximumTransferChars(request.MaxTransferChars))
+	}
+	var response Response
+	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return response
+}

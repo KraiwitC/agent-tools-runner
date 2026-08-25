@@ -16,7 +16,7 @@ import (
 	"unicode/utf8"
 )
 
-const maximumRankedSearchMatches = 20
+const maximumCollectedRankedSearchMatches = 200
 const minimumRankedSearchCharacters = 2
 const minimumFuzzySearchCharacters = 3
 const minimumFuzzyIdentifierScore = 0.75
@@ -117,9 +117,9 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 		return matches[first].Line < matches[second].Line
 	})
 
-	truncated := len(matches) > maximumRankedSearchMatches
+	truncated := len(matches) > maximumCollectedRankedSearchMatches
 	if truncated {
-		matches = matches[:maximumRankedSearchMatches]
+		matches = matches[:maximumCollectedRankedSearchMatches]
 	}
 	return matches, truncated, nil
 }

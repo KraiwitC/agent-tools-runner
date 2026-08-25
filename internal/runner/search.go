@@ -15,7 +15,7 @@ import (
 	"unicode/utf8"
 )
 
-const maximumSearchMatches = 100
+const maximumCollectedSearchMatches = 1000
 const scannerInitialBufferSize = 64 * 1024
 
 var defaultSearchExcludedDirectories = map[string]struct{}{
@@ -115,7 +115,7 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 		go func() {
 			defer wg.Done()
 			for path := range jobs {
-				fileMatches, err := searchFile(workspace, path, query, maximumSearchMatches+1)
+				fileMatches, err := searchFile(workspace, path, query, maximumCollectedSearchMatches+1)
 				if err != nil || len(fileMatches) == 0 {
 					continue
 				}
@@ -134,9 +134,9 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 		return allMatches[i].Line < allMatches[j].Line
 	})
 
-	truncated := len(allMatches) > maximumSearchMatches
+	truncated := len(allMatches) > maximumCollectedSearchMatches
 	if truncated {
-		allMatches = allMatches[:maximumSearchMatches]
+		allMatches = allMatches[:maximumCollectedSearchMatches]
 	}
 
 	return allMatches, truncated, nil

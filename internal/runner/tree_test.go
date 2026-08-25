@@ -189,7 +189,7 @@ func TestExecuteTreeActionRejectsWindowsVolumeQualifiedPath(t *testing.T) {
 
 func TestExecuteTreeActionKeepsLaterUpperLevelDirectoryWhenDeepTreeExceedsLimit(t *testing.T) {
 	workspace := t.TempDir()
-	for index := 0; index < maximumTreeEntries; index++ {
+	for index := 0; index < maximumCollectedTreeEntries; index++ {
 		writeTestFile(t, workspace, fmt.Sprintf("a-deep/file-%03d.txt", index), "content")
 	}
 	writeTestFile(t, workspace, "z-upper/file.txt", "upper")
@@ -202,8 +202,8 @@ func TestExecuteTreeActionKeepsLaterUpperLevelDirectoryWhenDeepTreeExceedsLimit(
 	if !truncated {
 		t.Fatal("expected tree result to be truncated")
 	}
-	if len(entries) != maximumTreeEntries {
-		t.Fatalf("expected %d entries, got %d", maximumTreeEntries, len(entries))
+	if len(entries) != maximumCollectedTreeEntries {
+		t.Fatalf("expected %d entries, got %d", maximumCollectedTreeEntries, len(entries))
 	}
 	if entries[0] != (TreeEntry{Path: "a-deep", Type: "directory"}) {
 		t.Fatalf("expected first upper-level directory, got %#v", entries[0])
@@ -215,7 +215,7 @@ func TestExecuteTreeActionKeepsLaterUpperLevelDirectoryWhenDeepTreeExceedsLimit(
 
 func TestExecuteTreeActionTruncatesAtLimit(t *testing.T) {
 	workspace := t.TempDir()
-	for index := 0; index < maximumTreeEntries+1; index++ {
+	for index := 0; index < maximumCollectedTreeEntries+1; index++ {
 		writeTestFile(t, workspace, fmt.Sprintf("file-%03d.txt", index), "content")
 	}
 	action := Action{ID: "project-tree", Operation: "tree", Path: "."}
@@ -227,8 +227,8 @@ func TestExecuteTreeActionTruncatesAtLimit(t *testing.T) {
 	if !truncated {
 		t.Fatal("expected tree result to be truncated")
 	}
-	if len(entries) != maximumTreeEntries {
-		t.Fatalf("expected %d entries, got %d", maximumTreeEntries, len(entries))
+	if len(entries) != maximumCollectedTreeEntries {
+		t.Fatalf("expected %d entries, got %d", maximumCollectedTreeEntries, len(entries))
 	}
 }
 

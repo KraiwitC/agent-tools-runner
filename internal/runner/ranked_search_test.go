@@ -126,10 +126,10 @@ func TestRankedSearchWorkspaceUsesSearchExclusions(t *testing.T) {
 	}
 }
 
-func TestRankedSearchWorkspaceTruncatesAtLimit(t *testing.T) {
+func TestRankedSearchWorkspaceTruncatesAtCollectionLimit(t *testing.T) {
 	workspace := t.TempDir()
 	var content strings.Builder
-	for index := 0; index < maximumRankedSearchMatches+1; index++ {
+	for index := 0; index < maximumCollectedRankedSearchMatches+1; index++ {
 		fmt.Fprintf(&content, "executeMoveAction %d\n", index)
 	}
 	writeTestFile(t, workspace, "many.go", content.String())
@@ -141,7 +141,7 @@ func TestRankedSearchWorkspaceTruncatesAtLimit(t *testing.T) {
 	if !truncated {
 		t.Fatal("expected ranked results to be truncated")
 	}
-	if len(matches) != maximumRankedSearchMatches {
-		t.Fatalf("matches = %d, want %d", len(matches), maximumRankedSearchMatches)
+	if len(matches) != maximumCollectedRankedSearchMatches {
+		t.Fatalf("matches = %d, want %d", len(matches), maximumCollectedRankedSearchMatches)
 	}
 }

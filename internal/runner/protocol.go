@@ -399,6 +399,9 @@ func ExecuteRequest(workspace string, request Request) string {
 	maxTransferChars := effectiveMaximumTransferChars(request.MaxTransferChars)
 	for actionIndex, action := range request.Actions {
 		result, responseError := executeAction(workspace, action, actionIndex)
+		if responseError == nil {
+			result = fitReadOnlyResult(response, result, maxTransferChars)
+		}
 		response.Results = append(response.Results, result)
 		if responseError != nil {
 			response.Status = "error"
@@ -426,6 +429,64 @@ func ExecuteRequest(workspace string, request Request) string {
 		return responseText
 	}
 	return createTransferLimitErrorResponse(maxTransferChars)
+}
+
+func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars int) ActionResult {
+	if result.Data == nil || resultFitsTransferLimit(response, result, maxTransferChars) {
+		return result
+	}
+
+	itemCount := readOnlyResultItemCount(result)
+	if itemCount < 0 {
+		return result
+	}
+
+	result.Data.Truncated = true
+	low := 0
+	high := itemCount
+	for low < high {
+		middle := low + (high-low+1)/2
+		candidate := truncateReadOnlyResult(result, middle)
+		if resultFitsTransferLimit(response, candidate, maxTransferChars) {
+			low = middle
+		} else {
+			high = middle - 1
+		}
+	}
+	return truncateReadOnlyResult(result, low)
+}
+
+func resultFitsTransferLimit(response Response, result ActionResult, maxTransferChars int) bool {
+	candidate := response
+	candidate.Results = append(append([]ActionResult(nil), response.Results...), result)
+	return len(marshalResponse(candidate)) <= maxTransferChars
+}
+
+func readOnlyResultItemCount(result ActionResult) int {
+	switch result.Operation {
+	case "search":
+		return len(result.Data.Matches)
+	case "ranked_search":
+		return len(result.Data.RankedMatches)
+	case "tree":
+		return len(result.Data.Entries)
+	default:
+		return -1
+	}
+}
+
+func truncateReadOnlyResult(result ActionResult, itemCount int) ActionResult {
+	data := *result.Data
+	result.Data = &data
+	switch result.Operation {
+	case "search":
+		data.Matches = data.Matches[:itemCount]
+	case "ranked_search":
+		data.RankedMatches = data.RankedMatches[:itemCount]
+	case "tree":
+		data.Entries = data.Entries[:itemCount]
+	}
+	return result
 }
 
 func createTransferLimitErrorResponse(maxTransferChars int) string {
