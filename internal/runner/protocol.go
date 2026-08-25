@@ -15,14 +15,12 @@ const protocolVersion = "1"
 const maximumActions = 100
 const maximumEditReplacements = 100
 const maximumReadRangeLines = 1000
-const defaultMaximumTransferChars = 100000
-const minimumTransferChars = 1000
+const defaultMaximumTransferChars = 120000
 const sha256HexLength = 64
 
 type Request struct {
-	Version          string   `json:"version"`
-	MaxTransferChars int      `json:"maxTransferChars,omitempty"`
-	Actions          []Action `json:"actions"`
+	Version string   `json:"version"`
+	Actions []Action `json:"actions"`
 }
 
 type Action struct {
@@ -183,7 +181,6 @@ func ParseAndValidateRequest(requestText string) (Request, error) {
 	if err := validateRequest(request); err != nil {
 		return Request{}, err
 	}
-	request.MaxTransferChars = effectiveMaximumTransferChars(request.MaxTransferChars)
 	return request, nil
 }
 
@@ -215,9 +212,6 @@ func ensureJSONEnd(decoder *json.Decoder) error {
 func validateRequest(request Request) error {
 	if request.Version != protocolVersion {
 		return fmt.Errorf("version must be %q", protocolVersion)
-	}
-	if request.MaxTransferChars != 0 && request.MaxTransferChars < minimumTransferChars {
-		return fmt.Errorf("maxTransferChars must be at least %d", minimumTransferChars)
 	}
 	if len(request.Actions) == 0 {
 		return errors.New("actions must contain at least one action")
@@ -375,13 +369,6 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 	return nil
 }
 
-func effectiveMaximumTransferChars(value int) int {
-	if value == 0 {
-		return defaultMaximumTransferChars
-	}
-	return value
-}
-
 func isValidSHA256(value string) bool {
 	if len(value) != sha256HexLength || value != strings.ToLower(value) {
 		return false
@@ -396,7 +383,7 @@ func ExecuteRequest(workspace string, request Request) string {
 		Status:  "success",
 		Results: make([]ActionResult, 0, len(request.Actions)),
 	}
-	maxTransferChars := effectiveMaximumTransferChars(request.MaxTransferChars)
+	maxTransferChars := defaultMaximumTransferChars
 	for actionIndex, action := range request.Actions {
 		result, responseError := executeAction(workspace, action, actionIndex)
 		if responseError == nil {
@@ -419,7 +406,7 @@ func ExecuteRequest(workspace string, request Request) string {
 				ActionID:    action.ID,
 				ActionIndex: actionIndex,
 				Code:        "TRANSFER_LIMIT_EXCEEDED",
-				Message:     "Response capped by maxTransferChars. maxTransferChars is the maximum number of characters ATR may return in a single response paste.",
+				Message:     "Response exceeded the configured transfer limit. Request less content or use read_range.",
 			}
 			break
 		}
@@ -496,7 +483,7 @@ func createTransferLimitErrorResponse(maxTransferChars int) string {
 		Results: []ActionResult{},
 		Error: &ResponseError{
 			Code:    "TRANSFER_LIMIT_EXCEEDED",
-			Message: fmt.Sprintf("Response capped by maxTransferChars (%d characters).", maxTransferChars),
+			Message: fmt.Sprintf("Response exceeded the configured transfer limit (%d characters)", maxTransferChars),
 		},
 	}
 	return marshalResponse(response)

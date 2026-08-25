@@ -36,7 +36,6 @@ Return exactly one fenced json code block containing one strict JSON object:
 
 Rules:
 - Use ASCII double quotes, no comments, no trailing commas, and unique action IDs.
-- maxTransferChars is an optional top-level field (default 100000). It is the maximum number of characters ATR may return to the LLM in a single response paste.
 - A request may contain at most 100 actions. An edit may contain at most 100 replacements.
 - Examples in this prompt are standalone documentation actions, not executable requests.
 

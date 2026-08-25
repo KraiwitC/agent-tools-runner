@@ -31,63 +31,6 @@ func TestParseAndValidateRequestAcceptsValidBatch(t *testing.T) {
 	}
 }
 
-func TestParseAndValidateRequestUsesDefaultTransferLimit(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
-
-	request, err := ParseAndValidateRequest(requestText)
-	if err != nil {
-		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
-	}
-	if request.MaxTransferChars != defaultMaximumTransferChars {
-		t.Fatalf("expected default maxTransferChars %d, got %d", defaultMaximumTransferChars, request.MaxTransferChars)
-	}
-}
-
-func TestParseAndValidateRequestPreservesExplicitTransferLimit(t *testing.T) {
-	requestText := `{"version":"1","maxTransferChars":64000,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
-
-	request, err := ParseAndValidateRequest(requestText)
-	if err != nil {
-		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
-	}
-	if request.MaxTransferChars != 64000 {
-		t.Fatalf("expected maxTransferChars 64000, got %d", request.MaxTransferChars)
-	}
-}
-
-func TestParseAndValidateRequestRejectsTransferLimitBelowMinimum(t *testing.T) {
-	requestText := `{"version":"1","maxTransferChars":999,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
-
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected transfer-limit validation error")
-	}
-}
-
-func TestParseAndValidateRequestAcceptsLargeTransferLimit(t *testing.T) {
-	requestText := `{"version":"1","maxTransferChars":5000000,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
-
-	request, err := ParseAndValidateRequest(requestText)
-	if err != nil {
-		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
-	}
-	if request.MaxTransferChars != 5000000 {
-		t.Fatalf("expected maxTransferChars 5000000, got %d", request.MaxTransferChars)
-	}
-}
-
-func TestParseAndValidateRequestAcceptsTransferLimitMinimum(t *testing.T) {
-	requestText := fmt.Sprintf(`{"version":"1","maxTransferChars":%d,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`, minimumTransferChars)
-
-	request, err := ParseAndValidateRequest(requestText)
-	if err != nil {
-		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
-	}
-	if request.MaxTransferChars != minimumTransferChars {
-		t.Fatalf("expected maxTransferChars %d, got %d", minimumTransferChars, request.MaxTransferChars)
-	}
-}
-
 func TestParseAndValidateRequestRejectsUnknownField(t *testing.T) {
 	requestText := `{"version":"1","actions":[],"status":"success"}`
 
@@ -265,42 +208,11 @@ func TestParseAndValidateRequestRejectsDuplicateActionIDs(t *testing.T) {
 	}
 }
 
-func TestExecuteRequestRejectsOversizedActionResult(t *testing.T) {
-	workspace := t.TempDir()
-	writeTestFile(t, workspace, "large.txt", strings.Repeat("a", 2000))
-	request := Request{
-		Version:          protocolVersion,
-		MaxTransferChars: minimumTransferChars,
-		Actions: []Action{
-			{ID: "read-large", Operation: "read", Paths: []string{"large.txt"}},
-		},
-	}
-
-	responseText := ExecuteRequest(workspace, request)
-	if len(responseText) > minimumTransferChars {
-		t.Fatalf("expected response within %d characters, got %d", minimumTransferChars, len(responseText))
-	}
-	var response Response
-	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if response.Status != "limit" || response.Error == nil || response.Error.Code != "TRANSFER_LIMIT_EXCEEDED" {
-		t.Fatalf("unexpected transfer-limit response: %#v", response)
-	}
-	if !strings.Contains(response.Error.Message, "maxTransferChars") {
-		t.Fatalf("expected maxTransferChars guidance, got %q", response.Error.Message)
-	}
-	if len(response.Results) != 1 || response.Results[0].Status != "error" || response.Results[0].Data != nil {
-		t.Fatalf("unexpected transfer-limit action result: %#v", response.Results)
-	}
-}
-
 func TestExecuteRequestPreservesResultWithinTransferLimit(t *testing.T) {
 	workspace := t.TempDir()
 	writeTestFile(t, workspace, "small.txt", "content")
 	request := Request{
-		Version:          protocolVersion,
-		MaxTransferChars: minimumTransferChars,
+		Version: protocolVersion,
 		Actions: []Action{
 			{ID: "read-small", Operation: "read", Paths: []string{"small.txt"}},
 		},
@@ -462,9 +374,8 @@ func TestExecuteRequestReturnsMoreReadOnlyItemsWhenTransferBudgetAllows(t *testi
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			request := Request{
-				Version:          protocolVersion,
-				MaxTransferChars: 500000,
-				Actions:          []Action{test.action},
+				Version: protocolVersion,
+				Actions: []Action{test.action},
 			}
 
 			response := executeRequestForTest(t, workspace, request)
@@ -481,91 +392,11 @@ func TestExecuteRequestReturnsMoreReadOnlyItemsWhenTransferBudgetAllows(t *testi
 	}
 }
 
-func TestExecuteRequestTruncatesReadOnlyItemsToTransferBudget(t *testing.T) {
-	workspace := t.TempDir()
-	var content strings.Builder
-	for index := 0; index < 200; index++ {
-		fmt.Fprintf(&content, "needle result with enough text to consume transfer space %03d\n", index)
-	}
-	writeTestFile(t, workspace, "many.txt", content.String())
-	request := Request{
-		Version:          protocolVersion,
-		MaxTransferChars: minimumTransferChars,
-		Actions: []Action{
-			{ID: "search", Operation: "search", Query: "needle"},
-		},
-	}
-
-	responseText := ExecuteRequest(workspace, request)
-	if len(responseText) > minimumTransferChars {
-		t.Fatalf("response length = %d, want at most %d", len(responseText), minimumTransferChars)
-	}
-	var response Response
-	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if response.Status != "success" || len(response.Results) != 1 || response.Results[0].Data == nil {
-		t.Fatalf("unexpected response: %#v", response)
-	}
-	data := response.Results[0].Data
-	if !data.Truncated {
-		t.Fatal("expected transfer-budget truncation")
-	}
-	if len(data.Matches) == 0 || len(data.Matches) >= 200 {
-		t.Fatalf("matches = %d, want a non-empty truncated result", len(data.Matches))
-	}
-	for index, match := range data.Matches {
-		if match.Line != index+1 {
-			t.Fatalf("match %d line = %d, want %d", index, match.Line, index+1)
-		}
-	}
-}
-
-func TestExecuteRequestUsesRemainingTransferBudgetForLaterReadOnlyAction(t *testing.T) {
-	workspace := t.TempDir()
-	writeTestFile(t, workspace, "first.txt", strings.Repeat("a", 400))
-	var content strings.Builder
-	for index := 0; index < 100; index++ {
-		fmt.Fprintf(&content, "needle result %03d with additional transfer content\n", index)
-	}
-	writeTestFile(t, workspace, "many.txt", content.String())
-
-	searchAction := Action{ID: "search", Operation: "search", Query: "needle"}
-	searchOnly := executeRequestForTest(t, workspace, Request{
-		Version:          protocolVersion,
-		MaxTransferChars: 2000,
-		Actions:          []Action{searchAction},
-	})
-	withPriorResult := executeRequestForTest(t, workspace, Request{
-		Version:          protocolVersion,
-		MaxTransferChars: 2000,
-		Actions: []Action{
-			{ID: "read", Operation: "read", Paths: []string{"first.txt"}},
-			searchAction,
-		},
-	})
-
-	if searchOnly.Status != "success" || len(searchOnly.Results) != 1 || searchOnly.Results[0].Data == nil {
-		t.Fatalf("unexpected search-only response: %#v", searchOnly)
-	}
-	if withPriorResult.Status != "success" || len(withPriorResult.Results) != 2 || withPriorResult.Results[1].Data == nil {
-		t.Fatalf("unexpected multi-action response: %#v", withPriorResult)
-	}
-	searchOnlyMatches := len(searchOnly.Results[0].Data.Matches)
-	laterMatches := len(withPriorResult.Results[1].Data.Matches)
-	if laterMatches >= searchOnlyMatches {
-		t.Fatalf("later action matches = %d, want fewer than search-only matches %d", laterMatches, searchOnlyMatches)
-	}
-	if !withPriorResult.Results[1].Data.Truncated {
-		t.Fatal("expected later search result to be truncated")
-	}
-}
-
 func executeRequestForTest(t *testing.T, workspace string, request Request) Response {
 	t.Helper()
 	responseText := ExecuteRequest(workspace, request)
-	if len(responseText) > effectiveMaximumTransferChars(request.MaxTransferChars) {
-		t.Fatalf("response length = %d, want at most %d", len(responseText), effectiveMaximumTransferChars(request.MaxTransferChars))
+	if len(responseText) > defaultMaximumTransferChars {
+		t.Fatalf("response length = %d, want at most %d", len(responseText), defaultMaximumTransferChars)
 	}
 	var response Response
 	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
