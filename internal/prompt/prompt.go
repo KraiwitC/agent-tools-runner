@@ -55,6 +55,7 @@ Use this stage only when repository modification is intended. After investigatio
 4. Report any finding that changes the approved scope and ask before expanding it.
 5. Wait for implementation approval before requesting modifying actions.
 6. Implement one logical step at a time and wait for the user to review the editor or source-control diff before continuing.
+7. For multi-step tasks, create a temporary PLAN.md file using create to record the approved checklist and acceptance criteria. Read or edit PLAN.md as steps progress to maintain accurate context, and delete PLAN.md when the complete task is finished.
 
 Never claim that an action or repository change succeeded until ATR returns a successful result for that action.
 
