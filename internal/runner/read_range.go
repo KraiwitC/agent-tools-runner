@@ -16,18 +16,18 @@ func executeReadRangeAction(workspace string, action Action, actionIndex int) (*
 	totalLines := len(lines)
 	if action.StartLine > totalLines {
 		return &ActionData{
-				Path:       file.Path,
-				StartLine:  action.StartLine,
-				EndLine:    action.EndLine,
-				TotalLines: totalLines,
-				SHA256:     file.SHA256,
-			}, &ResponseError{
-				ActionID:    action.ID,
-				ActionIndex: actionIndex,
-				Code:        "RANGE_OUT_OF_BOUNDS",
-				Message:     "startLine exceeds the file line count.",
-				Path:        file.Path,
-			}
+			Path:       file.Path,
+			StartLine:  action.StartLine,
+			EndLine:    action.EndLine,
+			TotalLines: totalLines,
+			SHA256:     file.SHA256,
+		}, &ResponseError{
+			ActionID:    action.ID,
+			ActionIndex: actionIndex,
+			Code:        "RANGE_OUT_OF_BOUNDS",
+			Message:     "startLine exceeds the file line count.",
+			Path:        file.Path,
+		}
 	}
 
 	endLine := action.EndLine
