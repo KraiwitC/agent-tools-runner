@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	atrclipboard "agent-tools-runner/internal/clipboard"
@@ -189,8 +190,13 @@ func isJSONRequestStart(input string) bool {
 }
 
 func handleCommand(command string, workspace string, lastResponse string, clipboardReady bool) bool {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return false
+	}
+
 	shouldExit := false
-	switch command {
+	switch fields[0] {
 	case "/help":
 		printHelp()
 	case "/prompt":
@@ -226,6 +232,24 @@ func handleCommand(command string, workspace string, lastResponse string, clipbo
 		} else {
 			fmt.Println(lastResponse)
 		}
+	case "/limit":
+		if len(fields) == 1 {
+			fmt.Printf("Transfer limit: %d characters\n", runner.MaximumTransferChars())
+			break
+		}
+		if len(fields) != 2 {
+			fmt.Println("Usage: /limit [characters]")
+			break
+		}
+
+		limit, err := strconv.Atoi(fields[1])
+		if err != nil || limit < 1000 {
+			fmt.Println("Transfer limit must be an integer greater than or equal to 1000.")
+			break
+		}
+
+		runner.SetMaximumTransferChars(limit)
+		fmt.Printf("Transfer limit: %d characters\n", limit)
 	case "/workspace":
 		fmt.Println(workspace)
 	case "/clear":
@@ -265,6 +289,7 @@ func printHelp() {
 	fmt.Println("  /show-prompt  Show the LLM bootstrap prompt")
 	fmt.Println("  /copy         Copy the last complete JSON response")
 	fmt.Println("  /show         Show the last complete JSON response")
+	fmt.Println("  /limit [n]    Show or set the transfer limit")
 	fmt.Println("  /workspace    Show the current workspace")
 	fmt.Println("  /clear        Clear the terminal without deleting the last response")
 	fmt.Println("  /exit         Exit Agent Tools Runner")

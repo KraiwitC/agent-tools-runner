@@ -18,6 +18,8 @@ const maximumReadRangeLines = 1000
 const defaultMaximumTransferChars = 120000
 const sha256HexLength = 64
 
+var maximumTransferChars = defaultMaximumTransferChars
+
 type Request struct {
 	Version string   `json:"version"`
 	Actions []Action `json:"actions"`
@@ -369,6 +371,14 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 	return nil
 }
 
+func MaximumTransferChars() int {
+	return maximumTransferChars
+}
+
+func SetMaximumTransferChars(value int) {
+	maximumTransferChars = value
+}
+
 func isValidSHA256(value string) bool {
 	if len(value) != sha256HexLength || value != strings.ToLower(value) {
 		return false
@@ -383,7 +393,7 @@ func ExecuteRequest(workspace string, request Request) string {
 		Status:  "success",
 		Results: make([]ActionResult, 0, len(request.Actions)),
 	}
-	maxTransferChars := defaultMaximumTransferChars
+	maxTransferChars := MaximumTransferChars()
 	for actionIndex, action := range request.Actions {
 		result, responseError := executeAction(workspace, action, actionIndex)
 		if responseError == nil {
