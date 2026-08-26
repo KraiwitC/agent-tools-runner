@@ -24,7 +24,11 @@ func summarizeResponse(responseText string) (string, error) {
 		summary.WriteString("\n")
 		summary.WriteString(fmt.Sprintf("  %-9s %s", responseOperationLabel(result.Operation), summarizeActionResult(result)))
 		if result.Status == "error" {
-			summary.WriteString(" [ERROR]")
+			resultStatus := "ERROR"
+			if response.Status == "limit" && response.Error != nil && response.Error.ActionIndex == actionIndex {
+				resultStatus = "LIMIT"
+			}
+			summary.WriteString(fmt.Sprintf(" [%s]", resultStatus))
 		}
 		if response.Error != nil && response.Error.ActionIndex == actionIndex {
 			summary.WriteString("\n")

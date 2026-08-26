@@ -237,6 +237,39 @@ func TestSummarizeResponseFormatsRequestErrorWithoutActionResults(t *testing.T) 
 	}
 }
 
+func TestSummarizeResponseFormatsTransferLimitAction(t *testing.T) {
+	response := runner.Response{
+		Version: "1",
+		Status:  "limit",
+		Results: []runner.ActionResult{
+			{
+				ID:        "read-file",
+				Operation: "read",
+				Status:    "error",
+			},
+		},
+		Error: &runner.ResponseError{
+			ActionID:    "read-file",
+			ActionIndex: 0,
+			Code:        "TRANSFER_LIMIT_EXCEEDED",
+			Message:     "Response exceeded the configured transfer limit. Request less content or use read_range.",
+		},
+	}
+
+	responseText := marshalSummaryTestResponse(t, response)
+	summary, err := summarizeResponse(responseText)
+	if err != nil {
+		t.Fatalf("summarizeResponse returned an error: %v", err)
+	}
+
+	expected := "\nLIMIT\n\n" +
+		"  READ      read-file [LIMIT]\n" +
+		"            TRANSFER_LIMIT_EXCEEDED: Response exceeded the configured transfer limit. Request less content or use read_range."
+	if summary != expected {
+		t.Fatalf("unexpected summary:\n%s\n\nexpected:\n%s", summary, expected)
+	}
+}
+
 func TestSummarizeResponseRejectsMalformedJSON(t *testing.T) {
 	responseText := "not-json"
 
