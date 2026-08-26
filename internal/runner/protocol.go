@@ -396,34 +396,36 @@ func ExecuteRequest(workspace string, request Request) string {
 	maxTransferChars := MaximumTransferChars()
 	for actionIndex, action := range request.Actions {
 		result, responseError := executeAction(workspace, action, actionIndex)
-		if responseError == nil {
-			result = fitReadOnlyResult(response, result, maxTransferChars)
-		}
-		response.Results = append(response.Results, result)
 		if responseError != nil {
+			response.Results = append(response.Results, result)
 			response.Status = "error"
 			response.Error = responseError
 			break
 		}
+
+		result = fitReadOnlyResult(response, result, maxTransferChars)
+		response.Results = append(response.Results, result)
 		if len(marshalResponse(response)) > maxTransferChars {
-			response.Results[len(response.Results)-1] = ActionResult{
-				ID:        action.ID,
-				Operation: action.Operation,
-				Status:    "error",
-			}
-			response.Status = "limit"
-			response.Error = &ResponseError{
-				ActionID:    action.ID,
-				ActionIndex: actionIndex,
-				Code:        "TRANSFER_LIMIT_EXCEEDED",
-				Message:     "Response exceeded the configured transfer limit. Request less content or use read_range.",
-			}
-			break
+			response.Results = response.Results[:len(response.Results)-1]
+			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
 		}
 	}
-	responseText := marshalResponse(response)
-	if len(responseText) <= maxTransferChars {
-		return responseText
+	return marshalResponse(response)
+}
+
+func createTransferLimitResponse(response Response, action Action, actionIndex int, maxTransferChars int) string {
+	response.Status = "limit"
+	response.Error = &ResponseError{
+		ActionID:    action.ID,
+		ActionIndex: actionIndex,
+		Code:        "TRANSFER_LIMIT_EXCEEDED",
+		Message:     "Response exceeded the configured transfer limit. Remaining actions were not executed.",
+	}
+	for len(response.Results) > 0 && len(marshalResponse(response)) > maxTransferChars {
+		response.Results = response.Results[:len(response.Results)-1]
+	}
+	if len(marshalResponse(response)) <= maxTransferChars {
+		return marshalResponse(response)
 	}
 	return createTransferLimitErrorResponse(maxTransferChars)
 }

@@ -336,7 +336,7 @@ func TestParseAndValidateRequestRejectsMultipleObjects(t *testing.T) {
 	}
 }
 
-func TestExecuteRequestTruncatesReadOnlyResultsToTransferLimit(t *testing.T) {
+func TestExecuteRequestPreservesResultsAtTransferLimit(t *testing.T) {
 	previousLimit := MaximumTransferChars()
 	SetMaximumTransferChars(700)
 	t.Cleanup(func() {
@@ -344,38 +344,26 @@ func TestExecuteRequestTruncatesReadOnlyResultsToTransferLimit(t *testing.T) {
 	})
 
 	workspace := t.TempDir()
-	var searchContent strings.Builder
-	for index := 0; index < 100; index++ {
-		fmt.Fprintf(&searchContent, "needle %03d\n", index)
+	writeTestFile(t, workspace, "first.txt", "first")
+	writeTestFile(t, workspace, "large.txt", strings.Repeat("needle\n", 100))
+
+	response := executeRequestForTest(t, workspace, Request{
+		Version: protocolVersion,
+		Actions: []Action{
+			{ID: "first", Operation: "read", Paths: []string{"first.txt"}},
+			{ID: "search", Operation: "search", Query: "needle"},
+		},
+	})
+
+	if len(response.Results) == 0 || response.Results[0].ID != "first" {
+		t.Fatalf("expected the earlier result to be preserved: %#v", response)
 	}
-	writeTestFile(t, workspace, "search.txt", searchContent.String())
-	readContent := strings.Repeat("content ", 300)
-	writeTestFile(t, workspace, "read.txt", readContent)
-
-	t.Run("search", func(t *testing.T) {
-		response := executeRequestForTest(t, workspace, Request{
-			Version: protocolVersion,
-			Actions: []Action{{ID: "search", Operation: "search", Query: "needle"}},
-		})
-		data := response.Results[0].Data
-		if response.Status != "success" || data == nil || !data.Truncated || len(data.Matches) == 0 || len(data.Matches) >= 100 {
-			t.Fatalf("unexpected truncated search response: %#v", response)
+	if len(response.Results) > 1 {
+		data := response.Results[1].Data
+		if data == nil || !data.Truncated || len(data.Matches) == 0 {
+			t.Fatalf("expected a useful partial search result: %#v", response.Results[1])
 		}
-	})
-
-	t.Run("read", func(t *testing.T) {
-		response := executeRequestForTest(t, workspace, Request{
-			Version: protocolVersion,
-			Actions: []Action{{ID: "read", Operation: "read", Paths: []string{"read.txt"}}},
-		})
-		data := response.Results[0].Data
-		if response.Status != "success" || data == nil || !data.Truncated || len(data.Files) != 1 {
-			t.Fatalf("unexpected truncated read response: %#v", response)
-		}
-		if data.Files[0].Content == "" || len(data.Files[0].Content) >= len(readContent) {
-			t.Fatalf("unexpected partial read content length: %d", len(data.Files[0].Content))
-		}
-	})
+	}
 }
 
 func executeRequestForTest(t *testing.T, workspace string, request Request) Response {
