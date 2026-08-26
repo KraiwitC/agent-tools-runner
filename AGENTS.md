@@ -10,7 +10,7 @@ Keep the code direct, maintainable, and understandable to a developer.
 
 - Investigate existing code before proposing a change; do not invent paths, behavior, or implementation details.
 - For modifications, present an evidence-based plan and wait for approval.
-- Implement one logical step at a time and ask the user to review the diff before continuing.
+- Implement one logical step at a time and ask the user to review the diff after all implementation steps are complete.
 - Do not create files, add dependencies, change architecture, or fix unrelated issues without approval.
 - Preserve existing naming, style, error handling, and package boundaries.
 - For release work, update application-version references without changing protocol version `1` unless the protocol changes.
