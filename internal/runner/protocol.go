@@ -433,57 +433,87 @@ func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars 
 		return result
 	}
 
-	itemCount := readOnlyResultItemCount(result)
-	if itemCount < 0 {
-		return result
-	}
+	data := *result.Data
+	result.Data = &data
+	data.Truncated = true
 
-	result.Data.Truncated = true
-	low := 0
-	high := itemCount
-	for low < high {
-		middle := low + (high-low+1)/2
-		candidate := truncateReadOnlyResult(result, middle)
-		if resultFitsTransferLimit(response, candidate, maxTransferChars) {
-			low = middle
+	switch result.Operation {
+	case "search":
+		matches := data.Matches
+		data.Matches = nil
+		for _, match := range matches {
+			data.Matches = append(data.Matches, match)
+			if !resultFitsTransferLimit(response, result, maxTransferChars) {
+				data.Matches = data.Matches[:len(data.Matches)-1]
+				break
+			}
+		}
+	case "ranked_search":
+		matches := data.RankedMatches
+		data.RankedMatches = nil
+		for _, match := range matches {
+			data.RankedMatches = append(data.RankedMatches, match)
+			if !resultFitsTransferLimit(response, result, maxTransferChars) {
+				data.RankedMatches = data.RankedMatches[:len(data.RankedMatches)-1]
+				break
+			}
+		}
+	case "tree":
+		entries := data.Entries
+		data.Entries = nil
+		for _, entry := range entries {
+			data.Entries = append(data.Entries, entry)
+			if !resultFitsTransferLimit(response, result, maxTransferChars) {
+				data.Entries = data.Entries[:len(data.Entries)-1]
+				break
+			}
+		}
+	case "read":
+		files := data.Files
+		data.Files = nil
+		for _, file := range files {
+			data.Files = append(data.Files, file)
+			if resultFitsTransferLimit(response, result, maxTransferChars) {
+				continue
+			}
+
+			fileIndex := len(data.Files) - 1
+			data.Files[fileIndex].Content = trimTextToFit(file.Content, func(content string) bool {
+				data.Files[fileIndex].Content = content
+				return resultFitsTransferLimit(response, result, maxTransferChars)
+			})
+			if !resultFitsTransferLimit(response, result, maxTransferChars) {
+				data.Files = data.Files[:fileIndex]
+			}
+			break
+		}
+	case "read_range":
+		data.Content = trimTextToFit(data.Content, func(content string) bool {
+			data.Content = content
+			return resultFitsTransferLimit(response, result, maxTransferChars)
+		})
+		lineCount := len(splitFileLines(data.Content))
+		if lineCount > 0 {
+			data.EndLine = data.StartLine + lineCount - 1
 		} else {
-			high = middle - 1
+			data.EndLine = data.StartLine
 		}
 	}
-	return truncateReadOnlyResult(result, low)
+	return result
+}
+
+func trimTextToFit(content string, fits func(string) bool) string {
+	runes := []rune(content)
+	for len(runes) > 0 && !fits(string(runes)) {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes)
 }
 
 func resultFitsTransferLimit(response Response, result ActionResult, maxTransferChars int) bool {
 	candidate := response
 	candidate.Results = append(append([]ActionResult(nil), response.Results...), result)
 	return len(marshalResponse(candidate)) <= maxTransferChars
-}
-
-func readOnlyResultItemCount(result ActionResult) int {
-	switch result.Operation {
-	case "search":
-		return len(result.Data.Matches)
-	case "ranked_search":
-		return len(result.Data.RankedMatches)
-	case "tree":
-		return len(result.Data.Entries)
-	default:
-		return -1
-	}
-}
-
-func truncateReadOnlyResult(result ActionResult, itemCount int) ActionResult {
-	data := *result.Data
-	result.Data = &data
-	switch result.Operation {
-	case "search":
-		data.Matches = data.Matches[:itemCount]
-	case "ranked_search":
-		data.RankedMatches = data.RankedMatches[:itemCount]
-	case "tree":
-		data.Entries = data.Entries[:itemCount]
-	}
-	return result
 }
 
 func createTransferLimitErrorResponse(maxTransferChars int) string {

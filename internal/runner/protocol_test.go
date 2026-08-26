@@ -336,67 +336,53 @@ func TestParseAndValidateRequestRejectsMultipleObjects(t *testing.T) {
 	}
 }
 
-func TestExecuteRequestReturnsMoreReadOnlyItemsWhenTransferBudgetAllows(t *testing.T) {
+func TestExecuteRequestTruncatesReadOnlyResultsToTransferLimit(t *testing.T) {
+	previousLimit := MaximumTransferChars()
+	SetMaximumTransferChars(700)
+	t.Cleanup(func() {
+		SetMaximumTransferChars(previousLimit)
+	})
+
 	workspace := t.TempDir()
-	var content strings.Builder
-	for index := 0; index < 150; index++ {
-		fmt.Fprintf(&content, "needle executeMoveAction %03d\n", index)
-		writeTestFile(t, workspace, fmt.Sprintf("tree/file-%03d.txt", index), "content")
+	var searchContent strings.Builder
+	for index := 0; index < 100; index++ {
+		fmt.Fprintf(&searchContent, "needle %03d\n", index)
 	}
-	writeTestFile(t, workspace, "matches.txt", content.String())
+	writeTestFile(t, workspace, "search.txt", searchContent.String())
+	readContent := strings.Repeat("content ", 300)
+	writeTestFile(t, workspace, "read.txt", readContent)
 
-	tests := []struct {
-		name         string
-		action       Action
-		minimumItems int
-		resultItems  func(*ActionData) int
-	}{
-		{
-			name:         "tree",
-			action:       Action{ID: "tree", Operation: "tree", Path: "."},
-			minimumItems: 151,
-			resultItems:  func(data *ActionData) int { return len(data.Entries) },
-		},
-		{
-			name:         "search",
-			action:       Action{ID: "search", Operation: "search", Query: "needle"},
-			minimumItems: 150,
-			resultItems:  func(data *ActionData) int { return len(data.Matches) },
-		},
-		{
-			name:         "ranked_search",
-			action:       Action{ID: "ranked", Operation: "ranked_search", Query: "executeMoveAction"},
-			minimumItems: 150,
-			resultItems:  func(data *ActionData) int { return len(data.RankedMatches) },
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			request := Request{
-				Version: protocolVersion,
-				Actions: []Action{test.action},
-			}
-
-			response := executeRequestForTest(t, workspace, request)
-			if response.Status != "success" || len(response.Results) != 1 || response.Results[0].Data == nil {
-				t.Fatalf("unexpected response: %#v", response)
-			}
-			if response.Results[0].Data.Truncated {
-				t.Fatal("did not expect result to be truncated")
-			}
-			if itemCount := test.resultItems(response.Results[0].Data); itemCount < test.minimumItems {
-				t.Fatalf("items = %d, want at least %d", itemCount, test.minimumItems)
-			}
+	t.Run("search", func(t *testing.T) {
+		response := executeRequestForTest(t, workspace, Request{
+			Version: protocolVersion,
+			Actions: []Action{{ID: "search", Operation: "search", Query: "needle"}},
 		})
-	}
+		data := response.Results[0].Data
+		if response.Status != "success" || data == nil || !data.Truncated || len(data.Matches) == 0 || len(data.Matches) >= 100 {
+			t.Fatalf("unexpected truncated search response: %#v", response)
+		}
+	})
+
+	t.Run("read", func(t *testing.T) {
+		response := executeRequestForTest(t, workspace, Request{
+			Version: protocolVersion,
+			Actions: []Action{{ID: "read", Operation: "read", Paths: []string{"read.txt"}}},
+		})
+		data := response.Results[0].Data
+		if response.Status != "success" || data == nil || !data.Truncated || len(data.Files) != 1 {
+			t.Fatalf("unexpected truncated read response: %#v", response)
+		}
+		if data.Files[0].Content == "" || len(data.Files[0].Content) >= len(readContent) {
+			t.Fatalf("unexpected partial read content length: %d", len(data.Files[0].Content))
+		}
+	})
 }
 
 func executeRequestForTest(t *testing.T, workspace string, request Request) Response {
 	t.Helper()
 	responseText := ExecuteRequest(workspace, request)
-	if len(responseText) > defaultMaximumTransferChars {
-		t.Fatalf("response length = %d, want at most %d", len(responseText), defaultMaximumTransferChars)
+	if len(responseText) > MaximumTransferChars() {
+		t.Fatalf("response length = %d, want at most %d", len(responseText), MaximumTransferChars())
 	}
 	var response Response
 	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
