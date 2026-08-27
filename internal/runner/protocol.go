@@ -404,7 +404,12 @@ func ExecuteRequest(workspace string, request Request) string {
 			response.Results = append(response.Results, result)
 			response.Status = "error"
 			response.Error = responseError
-			break
+			responseText := marshalResponse(response)
+			if len(responseText) <= maxTransferChars {
+				return responseText
+			}
+			response.Results = response.Results[:len(response.Results)-1]
+			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
 		}
 
 		fitResponse := response
@@ -415,9 +420,15 @@ func ExecuteRequest(workspace string, request Request) string {
 		if transferTruncated {
 			response.Status = "limit"
 			response.Error = newTransferLimitError(action, actionIndex)
-			return marshalResponse(response)
+			responseText := marshalResponse(response)
+			if len(responseText) <= maxTransferChars {
+				return responseText
+			}
+			response.Results = response.Results[:len(response.Results)-1]
+			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
 		}
-		if len(marshalResponse(response)) > maxTransferChars {
+		responseText := marshalResponse(response)
+		if len(responseText) > maxTransferChars {
 			response.Results = response.Results[:len(response.Results)-1]
 			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
 		}
@@ -428,8 +439,9 @@ func ExecuteRequest(workspace string, request Request) string {
 func createTransferLimitResponse(response Response, action Action, actionIndex int, maxTransferChars int) string {
 	response.Status = "limit"
 	response.Error = newTransferLimitError(action, actionIndex)
-	if len(marshalResponse(response)) <= maxTransferChars {
-		return marshalResponse(response)
+	responseText := marshalResponse(response)
+	if len(responseText) <= maxTransferChars {
+		return responseText
 	}
 	return createTransferLimitErrorResponse(maxTransferChars)
 }
@@ -504,13 +516,14 @@ func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars 
 	switch result.Operation {
 	case "search":
 		matches := data.Matches
-		data.Matches = nil
-		for _, match := range matches {
+		count := maximumFittingCount(len(matches), func(count int) bool {
+			data.Matches = matches[:count]
+			return resultFitsTransferLimit(response, result, maxTransferChars)
+		})
+		data.Matches = append([]SearchMatch(nil), matches[:count]...)
+		if count < len(matches) {
+			match := matches[count]
 			data.Matches = append(data.Matches, match)
-			if resultFitsTransferLimit(response, result, maxTransferChars) {
-				continue
-			}
-
 			matchIndex := len(data.Matches) - 1
 			data.Matches[matchIndex].Text = trimTextToFit(match.Text, func(content string) bool {
 				data.Matches[matchIndex].Text = content
@@ -519,17 +532,17 @@ func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars 
 			if !resultFitsTransferLimit(response, result, maxTransferChars) {
 				data.Matches = data.Matches[:matchIndex]
 			}
-			break
 		}
 	case "ranked_search":
 		matches := data.RankedMatches
-		data.RankedMatches = nil
-		for _, match := range matches {
+		count := maximumFittingCount(len(matches), func(count int) bool {
+			data.RankedMatches = matches[:count]
+			return resultFitsTransferLimit(response, result, maxTransferChars)
+		})
+		data.RankedMatches = append([]RankedSearchMatch(nil), matches[:count]...)
+		if count < len(matches) {
+			match := matches[count]
 			data.RankedMatches = append(data.RankedMatches, match)
-			if resultFitsTransferLimit(response, result, maxTransferChars) {
-				continue
-			}
-
 			matchIndex := len(data.RankedMatches) - 1
 			data.RankedMatches[matchIndex].Text = trimTextToFit(match.Text, func(content string) bool {
 				data.RankedMatches[matchIndex].Text = content
@@ -538,27 +551,24 @@ func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars 
 			if !resultFitsTransferLimit(response, result, maxTransferChars) {
 				data.RankedMatches = data.RankedMatches[:matchIndex]
 			}
-			break
 		}
 	case "tree":
 		entries := data.Entries
-		data.Entries = nil
-		for _, entry := range entries {
-			data.Entries = append(data.Entries, entry)
-			if !resultFitsTransferLimit(response, result, maxTransferChars) {
-				data.Entries = data.Entries[:len(data.Entries)-1]
-				break
-			}
-		}
+		count := maximumFittingCount(len(entries), func(count int) bool {
+			data.Entries = entries[:count]
+			return resultFitsTransferLimit(response, result, maxTransferChars)
+		})
+		data.Entries = entries[:count]
 	case "read":
 		files := data.Files
-		data.Files = nil
-		for _, file := range files {
+		count := maximumFittingCount(len(files), func(count int) bool {
+			data.Files = files[:count]
+			return resultFitsTransferLimit(response, result, maxTransferChars)
+		})
+		data.Files = append([]ReadFileResult(nil), files[:count]...)
+		if count < len(files) {
+			file := files[count]
 			data.Files = append(data.Files, file)
-			if resultFitsTransferLimit(response, result, maxTransferChars) {
-				continue
-			}
-
 			fileIndex := len(data.Files) - 1
 			data.Files[fileIndex].Content = trimTextToFit(file.Content, func(content string) bool {
 				data.Files[fileIndex].Content = content
@@ -567,7 +577,6 @@ func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars 
 			if !resultFitsTransferLimit(response, result, maxTransferChars) {
 				data.Files = data.Files[:fileIndex]
 			}
-			break
 		}
 	case "read_range":
 		data.Content = trimTextToFit(data.Content, func(content string) bool {
@@ -575,15 +584,29 @@ func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars 
 			return resultFitsTransferLimit(response, result, maxTransferChars)
 		})
 		lineCount := len(splitFileLines(data.Content))
-		if lineCount > 0 {
-			data.EndLine = data.StartLine + lineCount - 1
+		if lineCount == 0 {
+			data.EndLine = 0
 		} else {
-			data.EndLine = data.StartLine
+			data.EndLine = data.StartLine + lineCount - 1
 		}
 	default:
 		return result, false
 	}
 	return result, true
+}
+
+func maximumFittingCount(length int, fits func(int) bool) int {
+	low := 0
+	high := length
+	for low < high {
+		middle := low + (high-low+1)/2
+		if fits(middle) {
+			low = middle
+		} else {
+			high = middle - 1
+		}
+	}
+	return low
 }
 
 func trimTextToFit(content string, fits func(string) bool) string {

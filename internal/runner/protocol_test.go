@@ -284,6 +284,82 @@ func TestFitReadOnlyResultDoesNotTruncateInspectResult(t *testing.T) {
 	}
 }
 
+func TestMaximumFittingCount(t *testing.T) {
+	count := maximumFittingCount(10, func(count int) bool {
+		return count <= 7
+	})
+	if count != 7 {
+		t.Fatalf("maximum fitting count = %d, want 7", count)
+	}
+}
+
+func TestFitReadOnlyResultPreservesPartialNextSearchMatch(t *testing.T) {
+	response := Response{
+		Version: protocolVersion,
+		Status:  "limit",
+		Results: []ActionResult{},
+		Error:   newTransferLimitError(Action{ID: "search", Operation: "search"}, 0),
+	}
+	result := ActionResult{
+		ID:        "search",
+		Operation: "search",
+		Status:    "success",
+		Data: &ActionData{
+			Query: "needle",
+			Matches: []SearchMatch{
+				{Path: "first.txt", Line: 1, Text: "first"},
+				{Path: "second.txt", Line: 2, Text: strings.Repeat("x", 1000)},
+			},
+		},
+	}
+	limitedResult := result
+	limitedData := *result.Data
+	limitedData.Truncated = true
+	limitedData.Matches = append([]SearchMatch(nil), result.Data.Matches...)
+	limitedData.Matches[1].Text = strings.Repeat("x", 20)
+	limitedResult.Data = &limitedData
+	limit := len(marshalResponse(Response{
+		Version: protocolVersion,
+		Status:  "limit",
+		Results: []ActionResult{limitedResult},
+		Error:   response.Error,
+	}))
+
+	fittedResult, truncated := fitReadOnlyResult(response, result, limit)
+	if !truncated || fittedResult.Data == nil || len(fittedResult.Data.Matches) != 2 {
+		t.Fatalf("unexpected fitted result: %#v", fittedResult)
+	}
+	partialText := fittedResult.Data.Matches[1].Text
+	if partialText == "" || len(partialText) >= len(result.Data.Matches[1].Text) {
+		t.Fatalf("expected partial second match, got %d characters", len(partialText))
+	}
+	if !resultFitsTransferLimit(response, fittedResult, limit) {
+		t.Fatal("fitted result exceeds the transfer limit")
+	}
+}
+
+func TestExecuteRequestDropsOversizedErrorResult(t *testing.T) {
+	workspace := t.TempDir()
+	request := Request{
+		Version: protocolVersion,
+		Actions: []Action{
+			{ID: strings.Repeat("x", 2000), Operation: "read", Paths: []string{"missing.txt"}},
+		},
+	}
+
+	originalLimit := MaximumTransferChars()
+	SetMaximumTransferChars(1000)
+	t.Cleanup(func() { SetMaximumTransferChars(originalLimit) })
+
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "limit" || response.Error == nil || response.Error.Code != "TRANSFER_LIMIT_EXCEEDED" {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	if len(response.Results) != 0 {
+		t.Fatalf("expected oversized error result to be removed, got %d results", len(response.Results))
+	}
+}
+
 func TestExecuteRequestStopsAfterFirstFailure(t *testing.T) {
 	workspace := t.TempDir()
 	writeTestFile(t, workspace, "first.txt", "first")
