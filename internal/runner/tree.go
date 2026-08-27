@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const maximumTreeEntries = 500
+const maximumCollectedTreeEntries = 2000
 
 func executeTreeAction(workspace string, action Action, actionIndex int) ([]TreeEntry, string, bool, *ResponseError) {
 	resolvedPath, relativePath, err := resolveWorkspaceDirectory(workspace, action.Path)
@@ -128,7 +128,7 @@ func readWorkspaceTree(workspace string, root string) ([]TreeEntry, bool, error)
 				continue
 			}
 
-			if len(entries) >= maximumTreeEntries {
+			if len(entries) >= maximumCollectedTreeEntries {
 				return entries, true, nil
 			}
 

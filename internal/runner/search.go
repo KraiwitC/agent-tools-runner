@@ -3,7 +3,6 @@ package runner
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"io"
 	"io/fs"
 	"os"
@@ -15,7 +14,7 @@ import (
 	"unicode/utf8"
 )
 
-const maximumSearchMatches = 100
+const maximumCollectedSearchMatches = 1000
 const scannerInitialBufferSize = 64 * 1024
 
 var defaultSearchExcludedDirectories = map[string]struct{}{
@@ -43,8 +42,6 @@ var defaultSearchExcludedDirectories = map[string]struct{}{
 	".output":      {},
 	".terraform":   {},
 }
-
-var errSearchLimitReached = errors.New("search match limit reached")
 
 func executeSearchAction(workspace string, action Action, actionIndex int) ([]SearchMatch, bool, *ResponseError) {
 	matches, truncated, err := searchWorkspace(workspace, action.Query)
@@ -100,32 +97,38 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 		workerCount = len(files)
 	}
 
-	jobs := make(chan string, len(files))
-	for _, file := range files {
-		jobs <- file
-	}
-	close(jobs)
+	collectionLimit := maximumCollectedSearchMatches + 1
+	allMatches := make([]SearchMatch, 0, collectionLimit)
+	for batchStart := 0; batchStart < len(files) && len(allMatches) < collectionLimit; batchStart += workerCount {
+		batchEnd := min(batchStart+workerCount, len(files))
+		batchMatches := make([][]SearchMatch, batchEnd-batchStart)
+		batchErrors := make([]error, batchEnd-batchStart)
+		var wg sync.WaitGroup
 
-	var mu sync.Mutex
-	var allMatches []SearchMatch
-	var wg sync.WaitGroup
+		for fileIndex := batchStart; fileIndex < batchEnd; fileIndex++ {
+			batchIndex := fileIndex - batchStart
+			wg.Add(1)
+			go func(batchIndex int, fileIndex int) {
+				defer wg.Done()
+				batchMatches[batchIndex], batchErrors[batchIndex] = searchFile(workspace, files[fileIndex], query, collectionLimit)
+			}(batchIndex, fileIndex)
+		}
+		wg.Wait()
 
-	for i := 0; i < workerCount; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for path := range jobs {
-				fileMatches, err := searchFile(workspace, path, query, maximumSearchMatches+1)
-				if err != nil || len(fileMatches) == 0 {
-					continue
-				}
-				mu.Lock()
-				allMatches = append(allMatches, fileMatches...)
-				mu.Unlock()
+		for batchIndex, fileMatches := range batchMatches {
+			if batchErrors[batchIndex] != nil {
+				return nil, false, batchErrors[batchIndex]
 			}
-		}()
+			remainingMatches := collectionLimit - len(allMatches)
+			if len(fileMatches) > remainingMatches {
+				fileMatches = fileMatches[:remainingMatches]
+			}
+			allMatches = append(allMatches, fileMatches...)
+			if len(allMatches) >= collectionLimit {
+				break
+			}
+		}
 	}
-	wg.Wait()
 
 	sort.Slice(allMatches, func(i, j int) bool {
 		if allMatches[i].Path != allMatches[j].Path {
@@ -134,16 +137,16 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 		return allMatches[i].Line < allMatches[j].Line
 	})
 
-	truncated := len(allMatches) > maximumSearchMatches
+	truncated := len(allMatches) > maximumCollectedSearchMatches
 	if truncated {
-		allMatches = allMatches[:maximumSearchMatches]
+		allMatches = allMatches[:maximumCollectedSearchMatches]
 	}
 
 	return allMatches, truncated, nil
 }
 
-func searchFile(workspace string, path string, query string, remainingMatches int) ([]SearchMatch, error) {
-	if remainingMatches <= 0 {
+func searchFile(workspace string, path string, query string, matchLimit int) ([]SearchMatch, error) {
+	if matchLimit <= 0 {
 		return nil, nil
 	}
 
@@ -179,7 +182,7 @@ func searchFile(workspace string, path string, query string, remainingMatches in
 				Line: lineNumber,
 				Text: line,
 			})
-			if len(matches) >= remainingMatches {
+			if len(matches) >= matchLimit {
 				break
 			}
 		}

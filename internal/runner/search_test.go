@@ -69,10 +69,33 @@ func TestSearchWorkspaceSkipsBinaryAndOversizedFiles(t *testing.T) {
 	}
 }
 
-func TestSearchWorkspaceTruncatesAtLimit(t *testing.T) {
+func TestSearchWorkspaceRetainsDeterministicMatchesAtGlobalLimit(t *testing.T) {
+	workspace := t.TempDir()
+	content := strings.Repeat("needle\n", maximumCollectedSearchMatches+1)
+	writeTestFile(t, workspace, "a-first.txt", content)
+	writeTestFile(t, workspace, "z-later.txt", "needle\n")
+
+	for attempt := 0; attempt < 5; attempt++ {
+		matches, truncated, err := searchWorkspace(workspace, "needle")
+		if err != nil {
+			t.Fatalf("searchWorkspace returned an error: %v", err)
+		}
+		if !truncated {
+			t.Fatal("expected truncated search result")
+		}
+		if len(matches) != maximumCollectedSearchMatches {
+			t.Fatalf("expected %d matches, got %d", maximumCollectedSearchMatches, len(matches))
+		}
+		if matches[0].Path != "a-first.txt" || matches[len(matches)-1].Path != "a-first.txt" {
+			t.Fatalf("search retained nondeterministic files: first=%#v last=%#v", matches[0], matches[len(matches)-1])
+		}
+	}
+}
+
+func TestSearchWorkspaceTruncatesAtCollectionLimit(t *testing.T) {
 	workspace := t.TempDir()
 	var content strings.Builder
-	for index := 0; index < maximumSearchMatches+1; index++ {
+	for index := 0; index < maximumCollectedSearchMatches+1; index++ {
 		fmt.Fprintf(&content, "needle %d\n", index)
 	}
 	writeTestFile(t, workspace, "many.txt", content.String())
@@ -84,7 +107,7 @@ func TestSearchWorkspaceTruncatesAtLimit(t *testing.T) {
 	if !truncated {
 		t.Fatal("expected truncated search result")
 	}
-	if len(matches) != maximumSearchMatches {
-		t.Fatalf("expected %d matches, got %d", maximumSearchMatches, len(matches))
+	if len(matches) != maximumCollectedSearchMatches {
+		t.Fatalf("expected %d matches, got %d", maximumCollectedSearchMatches, len(matches))
 	}
 }

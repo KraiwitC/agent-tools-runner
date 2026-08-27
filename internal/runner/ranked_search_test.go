@@ -126,10 +126,58 @@ func TestRankedSearchWorkspaceUsesSearchExclusions(t *testing.T) {
 	}
 }
 
-func TestRankedSearchWorkspaceTruncatesAtLimit(t *testing.T) {
+func TestRankedSearchWorkspaceRetainsLateBestMatchWithinFileLimit(t *testing.T) {
 	workspace := t.TempDir()
 	var content strings.Builder
-	for index := 0; index < maximumRankedSearchMatches+1; index++ {
+	for index := 0; index < maximumCollectedRankedSearchMatches+1; index++ {
+		fmt.Fprintf(&content, "EXECUTEMOVEACTION %d\n", index)
+	}
+	content.WriteString("executeMoveAction\n")
+	writeTestFile(t, workspace, "matches.go", content.String())
+
+	matches, truncated, err := rankedSearchWorkspace(workspace, "executeMoveAction")
+	if err != nil {
+		t.Fatalf("rankedSearchWorkspace returned an error: %v", err)
+	}
+	if !truncated {
+		t.Fatal("expected ranked results to be truncated")
+	}
+	if len(matches) != maximumCollectedRankedSearchMatches {
+		t.Fatalf("matches = %d, want %d", len(matches), maximumCollectedRankedSearchMatches)
+	}
+	if matches[0].MatchType != "exact" || matches[0].Line != maximumCollectedRankedSearchMatches+2 {
+		t.Fatalf("late best match was not retained: %#v", matches[0])
+	}
+}
+
+func TestRankedSearchWorkspaceRetainsBestMatchesWithinGlobalLimit(t *testing.T) {
+	workspace := t.TempDir()
+	var lowerPriority strings.Builder
+	for index := 0; index < maximumCollectedRankedSearchMatches+1; index++ {
+		fmt.Fprintf(&lowerPriority, "EXECUTEMOVEACTION %d\n", index)
+	}
+	writeTestFile(t, workspace, "a-lower.go", lowerPriority.String())
+	writeTestFile(t, workspace, "z-best.go", "executeMoveAction\n")
+
+	matches, truncated, err := rankedSearchWorkspace(workspace, "executeMoveAction")
+	if err != nil {
+		t.Fatalf("rankedSearchWorkspace returned an error: %v", err)
+	}
+	if !truncated {
+		t.Fatal("expected ranked results to be truncated")
+	}
+	if len(matches) != maximumCollectedRankedSearchMatches {
+		t.Fatalf("matches = %d, want %d", len(matches), maximumCollectedRankedSearchMatches)
+	}
+	if matches[0].Path != "z-best.go" || matches[0].MatchType != "exact" {
+		t.Fatalf("best match was not retained: %#v", matches[0])
+	}
+}
+
+func TestRankedSearchWorkspaceTruncatesAtCollectionLimit(t *testing.T) {
+	workspace := t.TempDir()
+	var content strings.Builder
+	for index := 0; index < maximumCollectedRankedSearchMatches+1; index++ {
 		fmt.Fprintf(&content, "executeMoveAction %d\n", index)
 	}
 	writeTestFile(t, workspace, "many.go", content.String())
@@ -141,7 +189,7 @@ func TestRankedSearchWorkspaceTruncatesAtLimit(t *testing.T) {
 	if !truncated {
 		t.Fatal("expected ranked results to be truncated")
 	}
-	if len(matches) != maximumRankedSearchMatches {
-		t.Fatalf("matches = %d, want %d", len(matches), maximumRankedSearchMatches)
+	if len(matches) != maximumCollectedRankedSearchMatches {
+		t.Fatalf("matches = %d, want %d", len(matches), maximumCollectedRankedSearchMatches)
 	}
 }

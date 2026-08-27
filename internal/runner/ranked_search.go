@@ -16,7 +16,7 @@ import (
 	"unicode/utf8"
 )
 
-const maximumRankedSearchMatches = 20
+const maximumCollectedRankedSearchMatches = 200
 const minimumRankedSearchCharacters = 2
 const minimumFuzzySearchCharacters = 3
 const minimumFuzzyIdentifierScore = 0.75
@@ -75,33 +75,44 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 		workerCount = len(files)
 	}
 
-	jobs := make(chan string, len(files))
-	for _, file := range files {
-		jobs <- file
-	}
-	close(jobs)
+	collectionLimit := maximumCollectedRankedSearchMatches + 1
+	matches := make([]RankedSearchMatch, 0, collectionLimit)
+	for batchStart := 0; batchStart < len(files); batchStart += workerCount {
+		batchEnd := min(batchStart+workerCount, len(files))
+		batchMatches := make([][]RankedSearchMatch, batchEnd-batchStart)
+		batchErrors := make([]error, batchEnd-batchStart)
+		var wg sync.WaitGroup
 
-	var mu sync.Mutex
-	var matches []RankedSearchMatch
-	var wg sync.WaitGroup
+		for fileIndex := batchStart; fileIndex < batchEnd; fileIndex++ {
+			batchIndex := fileIndex - batchStart
+			wg.Add(1)
+			go func(batchIndex int, fileIndex int) {
+				defer wg.Done()
+				batchMatches[batchIndex], batchErrors[batchIndex] = rankedSearchFile(workspace, files[fileIndex], query, collectionLimit)
+			}(batchIndex, fileIndex)
+		}
+		wg.Wait()
 
-	for i := 0; i < workerCount; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for path := range jobs {
-				fileMatches, err := rankedSearchFile(workspace, path, query)
-				if err != nil || len(fileMatches) == 0 {
-					continue
-				}
-				mu.Lock()
-				matches = append(matches, fileMatches...)
-				mu.Unlock()
+		for batchIndex, fileMatches := range batchMatches {
+			if batchErrors[batchIndex] != nil {
+				return nil, false, batchErrors[batchIndex]
 			}
-		}()
+			matches = append(matches, fileMatches...)
+		}
+		sortRankedSearchMatches(matches)
+		if len(matches) > collectionLimit {
+			matches = matches[:collectionLimit]
+		}
 	}
-	wg.Wait()
 
+	truncated := len(matches) > maximumCollectedRankedSearchMatches
+	if truncated {
+		matches = matches[:maximumCollectedRankedSearchMatches]
+	}
+	return matches, truncated, nil
+}
+
+func sortRankedSearchMatches(matches []RankedSearchMatch) {
 	sort.Slice(matches, func(first int, second int) bool {
 		if matches[first].Score != matches[second].Score {
 			return matches[first].Score > matches[second].Score
@@ -116,15 +127,9 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 		}
 		return matches[first].Line < matches[second].Line
 	})
-
-	truncated := len(matches) > maximumRankedSearchMatches
-	if truncated {
-		matches = matches[:maximumRankedSearchMatches]
-	}
-	return matches, truncated, nil
 }
 
-func rankedSearchFile(workspace string, path string, query string) ([]RankedSearchMatch, error) {
+func rankedSearchFile(workspace string, path string, query string, matchLimit int) ([]RankedSearchMatch, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -160,10 +165,18 @@ func rankedSearchFile(workspace string, path string, query string) ([]RankedSear
 				MatchType: matchType,
 				Score:     score,
 			})
+			if len(matches) >= matchLimit*2 {
+				sortRankedSearchMatches(matches)
+				matches = matches[:matchLimit]
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+	if len(matches) > matchLimit {
+		sortRankedSearchMatches(matches)
+		matches = matches[:matchLimit]
 	}
 	return matches, nil
 }

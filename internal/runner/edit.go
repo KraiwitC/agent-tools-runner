@@ -1,12 +1,15 @@
 package runner
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
+
+var errEditTargetChanged = errors.New("edit target changed")
 
 type preparedReplacement struct {
 	Start   int
@@ -41,12 +44,18 @@ func executeEditAction(workspace string, action Action, actionIndex int) (int, s
 	}
 
 	updatedContent := applyPreparedReplacements(content, preparedReplacements)
-	if err := replaceFile(resolvedPath, updatedContent, fileInfo.Mode().Perm()); err != nil {
+	if err := replaceFile(resolvedPath, updatedContent, fileInfo.Mode().Perm(), action.ExpectedSHA256); err != nil {
+		code := "WRITE_FAILED"
+		message := "Could not safely write the edited file."
+		if errors.Is(err, errEditTargetChanged) {
+			code = "FILE_CHANGED"
+			message = "File content changed before replacement."
+		}
 		return 0, "", &ResponseError{
 			ActionID:    action.ID,
 			ActionIndex: actionIndex,
-			Code:        "WRITE_FAILED",
-			Message:     "Could not safely write the edited file.",
+			Code:        code,
+			Message:     message,
 			Path:        relativePath,
 		}
 	}
@@ -114,7 +123,7 @@ func applyPreparedReplacements(content string, replacements []preparedReplacemen
 	return updated
 }
 
-func replaceFile(path string, content string, fileMode os.FileMode) error {
+func replaceFile(path string, content string, fileMode os.FileMode, expectedSHA256 string) error {
 	temporaryFile, err := os.CreateTemp(filepath.Dir(path), ".atr-edit-*")
 	if err != nil {
 		return fmt.Errorf("create temporary file: %w", err)
@@ -142,6 +151,14 @@ func replaceFile(path string, content string, fileMode os.FileMode) error {
 	}
 	if err := temporaryFile.Close(); err != nil {
 		return fmt.Errorf("close temporary file: %w", err)
+	}
+
+	currentContent, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("recheck target file: %w", err)
+	}
+	if calculateSHA256(currentContent) != expectedSHA256 {
+		return errEditTargetChanged
 	}
 	if err := os.Rename(temporaryPath, path); err != nil {
 		return fmt.Errorf("replace target file: %w", err)

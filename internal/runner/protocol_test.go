@@ -31,63 +31,6 @@ func TestParseAndValidateRequestAcceptsValidBatch(t *testing.T) {
 	}
 }
 
-func TestParseAndValidateRequestUsesDefaultTransferLimit(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
-
-	request, err := ParseAndValidateRequest(requestText)
-	if err != nil {
-		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
-	}
-	if request.MaxTransferChars != defaultMaximumTransferChars {
-		t.Fatalf("expected default maxTransferChars %d, got %d", defaultMaximumTransferChars, request.MaxTransferChars)
-	}
-}
-
-func TestParseAndValidateRequestPreservesExplicitTransferLimit(t *testing.T) {
-	requestText := `{"version":"1","maxTransferChars":64000,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
-
-	request, err := ParseAndValidateRequest(requestText)
-	if err != nil {
-		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
-	}
-	if request.MaxTransferChars != 64000 {
-		t.Fatalf("expected maxTransferChars 64000, got %d", request.MaxTransferChars)
-	}
-}
-
-func TestParseAndValidateRequestRejectsTransferLimitBelowMinimum(t *testing.T) {
-	requestText := `{"version":"1","maxTransferChars":999,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
-
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected transfer-limit validation error")
-	}
-}
-
-func TestParseAndValidateRequestAcceptsLargeTransferLimit(t *testing.T) {
-	requestText := `{"version":"1","maxTransferChars":5000000,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`
-
-	request, err := ParseAndValidateRequest(requestText)
-	if err != nil {
-		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
-	}
-	if request.MaxTransferChars != 5000000 {
-		t.Fatalf("expected maxTransferChars 5000000, got %d", request.MaxTransferChars)
-	}
-}
-
-func TestParseAndValidateRequestAcceptsTransferLimitMinimum(t *testing.T) {
-	requestText := fmt.Sprintf(`{"version":"1","maxTransferChars":%d,"actions":[{"id":"read","operation":"read","paths":["main.go"]}]}`, minimumTransferChars)
-
-	request, err := ParseAndValidateRequest(requestText)
-	if err != nil {
-		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
-	}
-	if request.MaxTransferChars != minimumTransferChars {
-		t.Fatalf("expected maxTransferChars %d, got %d", minimumTransferChars, request.MaxTransferChars)
-	}
-}
-
 func TestParseAndValidateRequestRejectsUnknownField(t *testing.T) {
 	requestText := `{"version":"1","actions":[],"status":"success"}`
 
@@ -265,39 +208,11 @@ func TestParseAndValidateRequestRejectsDuplicateActionIDs(t *testing.T) {
 	}
 }
 
-func TestExecuteRequestRejectsOversizedActionResult(t *testing.T) {
-	workspace := t.TempDir()
-	writeTestFile(t, workspace, "large.txt", strings.Repeat("a", 2000))
-	request := Request{
-		Version:          protocolVersion,
-		MaxTransferChars: minimumTransferChars,
-		Actions: []Action{
-			{ID: "read-large", Operation: "read", Paths: []string{"large.txt"}},
-		},
-	}
-
-	responseText := ExecuteRequest(workspace, request)
-	if len(responseText) > minimumTransferChars {
-		t.Fatalf("expected response within %d characters, got %d", minimumTransferChars, len(responseText))
-	}
-	var response Response
-	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if response.Status != "error" || response.Error == nil || response.Error.Code != "TRANSFER_LIMIT_EXCEEDED" {
-		t.Fatalf("unexpected transfer-limit response: %#v", response)
-	}
-	if len(response.Results) != 1 || response.Results[0].Status != "error" || response.Results[0].Data != nil {
-		t.Fatalf("unexpected transfer-limit action result: %#v", response.Results)
-	}
-}
-
 func TestExecuteRequestPreservesResultWithinTransferLimit(t *testing.T) {
 	workspace := t.TempDir()
 	writeTestFile(t, workspace, "small.txt", "content")
 	request := Request{
-		Version:          protocolVersion,
-		MaxTransferChars: minimumTransferChars,
+		Version: protocolVersion,
 		Actions: []Action{
 			{ID: "read-small", Operation: "read", Paths: []string{"small.txt"}},
 		},
@@ -310,6 +225,135 @@ func TestExecuteRequestPreservesResultWithinTransferLimit(t *testing.T) {
 	}
 	if response.Status != "success" || len(response.Results) != 1 || response.Results[0].Data == nil {
 		t.Fatalf("unexpected successful response: %#v", response)
+	}
+}
+
+func TestExecuteRequestDoesNotModifyWorkspaceWithoutResponseCapacity(t *testing.T) {
+	workspace := t.TempDir()
+	action := Action{
+		ID:        strings.Repeat("x", 1000),
+		Operation: "create",
+		Path:      "created.txt",
+		Content:   "content",
+	}
+	request := Request{
+		Version: protocolVersion,
+		Actions: []Action{action},
+	}
+	candidate := Response{
+		Version: protocolVersion,
+		Status:  "limit",
+		Results: []ActionResult{maximumModifyingActionResult(action)},
+		Error:   newTransferLimitError(action, 0),
+	}
+
+	originalLimit := MaximumTransferChars()
+	SetMaximumTransferChars(len(marshalResponse(candidate)) - 1)
+	t.Cleanup(func() { SetMaximumTransferChars(originalLimit) })
+
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "limit" || response.Error == nil || response.Error.Code != "TRANSFER_LIMIT_EXCEEDED" {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	assertPathDoesNotExist(t, workspace+"/created.txt")
+}
+
+func TestExecuteRequestReturnsPartialSecondRead(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "first.txt", strings.Repeat("a", 200))
+	writeTestFile(t, workspace, "second.txt", strings.Repeat("b", 5000))
+	request := Request{
+		Version: protocolVersion,
+		Actions: []Action{
+			{ID: "first", Operation: "read", Paths: []string{"first.txt"}},
+			{ID: "second", Operation: "read", Paths: []string{"second.txt"}},
+		},
+	}
+
+	originalLimit := MaximumTransferChars()
+	SetMaximumTransferChars(1500)
+	t.Cleanup(func() { SetMaximumTransferChars(originalLimit) })
+
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "limit" || len(response.Results) != 2 {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	secondResult := response.Results[1]
+	if secondResult.Data == nil || !secondResult.Data.Truncated || len(secondResult.Data.Files) != 1 {
+		t.Fatalf("unexpected second result: %#v", secondResult)
+	}
+	content := secondResult.Data.Files[0].Content
+	if content == "" || len(content) >= 5000 {
+		t.Fatalf("expected partial second file, got %d characters", len(content))
+	}
+}
+
+func TestExecuteRequestTruncatesReadRangeAtLineBoundary(t *testing.T) {
+	workspace := t.TempDir()
+	line := strings.Repeat("x", 1000) + "\n"
+	content := line + line
+	writeTestFile(t, workspace, "lines.txt", content)
+	request := Request{
+		Version: protocolVersion,
+		Actions: []Action{
+			{ID: "read-range", Operation: "read_range", Path: "lines.txt", StartLine: 1, EndLine: 2},
+		},
+	}
+	oneLineResponse := Response{
+		Version: protocolVersion,
+		Status:  "limit",
+		Results: []ActionResult{
+			{
+				ID:        "read-range",
+				Operation: "read_range",
+				Status:    "success",
+				Data: &ActionData{
+					Path:       "lines.txt",
+					Content:    line,
+					StartLine:  1,
+					EndLine:    1,
+					TotalLines: 2,
+					SHA256:     calculateSHA256([]byte(content)),
+					Truncated:  true,
+				},
+			},
+		},
+		Error: newTransferLimitError(request.Actions[0], 0),
+	}
+
+	originalLimit := MaximumTransferChars()
+	SetMaximumTransferChars(len(marshalResponse(oneLineResponse)))
+	t.Cleanup(func() { SetMaximumTransferChars(originalLimit) })
+
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "limit" || len(response.Results) != 1 {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	data := response.Results[0].Data
+	if data == nil || !data.Truncated || data.Content != line || data.EndLine != 1 {
+		t.Fatalf("unexpected truncated range: %#v", data)
+	}
+}
+
+func TestExecuteRequestDropsOversizedErrorResult(t *testing.T) {
+	workspace := t.TempDir()
+	request := Request{
+		Version: protocolVersion,
+		Actions: []Action{
+			{ID: strings.Repeat("x", 2000), Operation: "read", Paths: []string{"missing.txt"}},
+		},
+	}
+
+	originalLimit := MaximumTransferChars()
+	SetMaximumTransferChars(1000)
+	t.Cleanup(func() { SetMaximumTransferChars(originalLimit) })
+
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "limit" || response.Error == nil || response.Error.Code != "TRANSFER_LIMIT_EXCEEDED" {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	if len(response.Results) != 0 {
+		t.Fatalf("expected oversized error result to be removed, got %d results", len(response.Results))
 	}
 }
 
@@ -419,4 +463,17 @@ func TestParseAndValidateRequestRejectsMultipleObjects(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected multiple JSON objects to be rejected")
 	}
+}
+
+func executeRequestForTest(t *testing.T, workspace string, request Request) Response {
+	t.Helper()
+	responseText := ExecuteRequest(workspace, request)
+	if len(responseText) > MaximumTransferChars() {
+		t.Fatalf("response length = %d, want at most %d", len(responseText), MaximumTransferChars())
+	}
+	var response Response
+	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return response
 }

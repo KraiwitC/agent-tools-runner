@@ -15,14 +15,14 @@ const protocolVersion = "1"
 const maximumActions = 100
 const maximumEditReplacements = 100
 const maximumReadRangeLines = 1000
-const defaultMaximumTransferChars = 100000
-const minimumTransferChars = 1000
+const defaultMaximumTransferChars = 120000
 const sha256HexLength = 64
 
+var maximumTransferChars = defaultMaximumTransferChars
+
 type Request struct {
-	Version          string   `json:"version"`
-	MaxTransferChars int      `json:"maxTransferChars,omitempty"`
-	Actions          []Action `json:"actions"`
+	Version string   `json:"version"`
+	Actions []Action `json:"actions"`
 }
 
 type Action struct {
@@ -183,7 +183,6 @@ func ParseAndValidateRequest(requestText string) (Request, error) {
 	if err := validateRequest(request); err != nil {
 		return Request{}, err
 	}
-	request.MaxTransferChars = effectiveMaximumTransferChars(request.MaxTransferChars)
 	return request, nil
 }
 
@@ -215,9 +214,6 @@ func ensureJSONEnd(decoder *json.Decoder) error {
 func validateRequest(request Request) error {
 	if request.Version != protocolVersion {
 		return fmt.Errorf("version must be %q", protocolVersion)
-	}
-	if request.MaxTransferChars != 0 && request.MaxTransferChars < minimumTransferChars {
-		return fmt.Errorf("maxTransferChars must be at least %d", minimumTransferChars)
 	}
 	if len(request.Actions) == 0 {
 		return errors.New("actions must contain at least one action")
@@ -375,13 +371,6 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 	return nil
 }
 
-func effectiveMaximumTransferChars(value int) int {
-	if value == 0 {
-		return defaultMaximumTransferChars
-	}
-	return value
-}
-
 func isValidSHA256(value string) bool {
 	if len(value) != sha256HexLength || value != strings.ToLower(value) {
 		return false
@@ -396,48 +385,29 @@ func ExecuteRequest(workspace string, request Request) string {
 		Status:  "success",
 		Results: make([]ActionResult, 0, len(request.Actions)),
 	}
-	maxTransferChars := effectiveMaximumTransferChars(request.MaxTransferChars)
+	maxTransferChars := MaximumTransferChars()
+
 	for actionIndex, action := range request.Actions {
+		if isModifyingOperation(action.Operation) && !modifyingActionResultFits(response, action, actionIndex, maxTransferChars) {
+			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
+		}
+
 		result, responseError := executeAction(workspace, action, actionIndex)
-		response.Results = append(response.Results, result)
 		if responseError != nil {
-			response.Status = "error"
-			response.Error = responseError
-			break
+			return finishActionError(response, result, responseError, action, actionIndex, maxTransferChars)
+		}
+
+		result, truncated := fitSuccessfulResult(response, result, action, actionIndex, maxTransferChars)
+		response.Results = append(response.Results, result)
+		if truncated {
+			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
 		}
 		if len(marshalResponse(response)) > maxTransferChars {
-			response.Results[len(response.Results)-1] = ActionResult{
-				ID:        action.ID,
-				Operation: action.Operation,
-				Status:    "error",
-			}
-			response.Status = "error"
-			response.Error = &ResponseError{
-				ActionID:    action.ID,
-				ActionIndex: actionIndex,
-				Code:        "TRANSFER_LIMIT_EXCEEDED",
-				Message:     "The action result exceeds maxTransferChars. Request less content or use a smaller range.",
-			}
-			break
+			response.Results = response.Results[:len(response.Results)-1]
+			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
 		}
 	}
-	responseText := marshalResponse(response)
-	if len(responseText) <= maxTransferChars {
-		return responseText
-	}
-	return createTransferLimitErrorResponse(maxTransferChars)
-}
 
-func createTransferLimitErrorResponse(maxTransferChars int) string {
-	response := Response{
-		Version: protocolVersion,
-		Status:  "error",
-		Results: []ActionResult{},
-		Error: &ResponseError{
-			Code:    "TRANSFER_LIMIT_EXCEEDED",
-			Message: fmt.Sprintf("The response exceeds the %d character transfer limit.", maxTransferChars),
-		},
-	}
 	return marshalResponse(response)
 }
 
