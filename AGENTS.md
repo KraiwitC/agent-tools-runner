@@ -41,6 +41,7 @@ Keep the code direct, maintainable, and understandable to a developer.
 - `internal/runner`: protocol validation, responses, and filesystem operations.
 - `internal/clipboard`: clipboard integration using `golang.design/x/clipboard`.
 - Application releases are independent of JSON protocol version `1`.
+- Transfer limits are presented as characters to match LLM chat limits, while ATR conservatively enforces them using the serialized JSON byte length.
 
 ## Testing
 
