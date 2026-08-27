@@ -81,8 +81,10 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 	}
 	close(jobs)
 
+	collectionLimit := maximumCollectedRankedSearchMatches + 1
 	var mu sync.Mutex
 	var matches []RankedSearchMatch
+	var searchErr error
 	var wg sync.WaitGroup
 
 	for i := 0; i < workerCount; i++ {
@@ -90,18 +92,44 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 		go func() {
 			defer wg.Done()
 			for path := range jobs {
-				fileMatches, err := rankedSearchFile(workspace, path, query)
-				if err != nil || len(fileMatches) == 0 {
+				mu.Lock()
+				stopped := searchErr != nil
+				mu.Unlock()
+				if stopped {
 					continue
 				}
+
+				fileMatches, err := rankedSearchFile(workspace, path, query, collectionLimit)
 				mu.Lock()
-				matches = append(matches, fileMatches...)
+				if err != nil && searchErr == nil {
+					searchErr = err
+				}
+				if err == nil && len(fileMatches) > 0 {
+					matches = append(matches, fileMatches...)
+					sortRankedSearchMatches(matches)
+					if len(matches) > collectionLimit {
+						matches = matches[:collectionLimit]
+					}
+				}
 				mu.Unlock()
 			}
 		}()
 	}
 	wg.Wait()
 
+	if searchErr != nil {
+		return nil, false, searchErr
+	}
+
+	sortRankedSearchMatches(matches)
+	truncated := len(matches) > maximumCollectedRankedSearchMatches
+	if truncated {
+		matches = matches[:maximumCollectedRankedSearchMatches]
+	}
+	return matches, truncated, nil
+}
+
+func sortRankedSearchMatches(matches []RankedSearchMatch) {
 	sort.Slice(matches, func(first int, second int) bool {
 		if matches[first].Score != matches[second].Score {
 			return matches[first].Score > matches[second].Score
@@ -116,15 +144,9 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 		}
 		return matches[first].Line < matches[second].Line
 	})
-
-	truncated := len(matches) > maximumCollectedRankedSearchMatches
-	if truncated {
-		matches = matches[:maximumCollectedRankedSearchMatches]
-	}
-	return matches, truncated, nil
 }
 
-func rankedSearchFile(workspace string, path string, query string) ([]RankedSearchMatch, error) {
+func rankedSearchFile(workspace string, path string, query string, matchLimit int) ([]RankedSearchMatch, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -160,10 +182,18 @@ func rankedSearchFile(workspace string, path string, query string) ([]RankedSear
 				MatchType: matchType,
 				Score:     score,
 			})
+			if len(matches) >= matchLimit*2 {
+				sortRankedSearchMatches(matches)
+				matches = matches[:matchLimit]
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+	if len(matches) > matchLimit {
+		sortRankedSearchMatches(matches)
+		matches = matches[:matchLimit]
 	}
 	return matches, nil
 }

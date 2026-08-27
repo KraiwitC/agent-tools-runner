@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -224,6 +225,62 @@ func TestExecuteRequestPreservesResultWithinTransferLimit(t *testing.T) {
 	}
 	if response.Status != "success" || len(response.Results) != 1 || response.Results[0].Data == nil {
 		t.Fatalf("unexpected successful response: %#v", response)
+	}
+}
+
+func TestExecuteRequestDoesNotModifyWorkspaceWithoutResponseCapacity(t *testing.T) {
+	workspace := t.TempDir()
+	action := Action{
+		ID:        strings.Repeat("x", 1000),
+		Operation: "create",
+		Path:      "created.txt",
+		Content:   "content",
+	}
+	request := Request{
+		Version: protocolVersion,
+		Actions: []Action{action},
+	}
+	candidate := Response{
+		Version: protocolVersion,
+		Status:  "limit",
+		Results: []ActionResult{maximumModifyingActionResult(action)},
+		Error:   newTransferLimitError(action, 0),
+	}
+	candidate.Error.Path = longestActionPath(action)
+
+	originalLimit := MaximumTransferChars()
+	SetMaximumTransferChars(len(marshalResponse(candidate)) - 1)
+	t.Cleanup(func() { SetMaximumTransferChars(originalLimit) })
+
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "limit" || response.Error == nil || response.Error.Code != "TRANSFER_LIMIT_EXCEEDED" {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	assertPathDoesNotExist(t, workspace+"/created.txt")
+}
+
+func TestFitReadOnlyResultDoesNotTruncateInspectResult(t *testing.T) {
+	response := Response{
+		Version: protocolVersion,
+		Status:  "limit",
+		Results: []ActionResult{},
+	}
+	result := ActionResult{
+		ID:        "inspect",
+		Operation: "inspect",
+		Status:    "success",
+		Data: &ActionData{
+			Path: "file.txt",
+			Type: "file",
+		},
+	}
+
+	fittedResult, truncated := fitReadOnlyResult(response, result, 1)
+	if truncated {
+		t.Fatal("inspect result must not be treated as truncatable")
+	}
+	if fittedResult.Data == nil || fittedResult.Data.Path != "file.txt" {
+		t.Fatalf("inspect result was changed: %#v", fittedResult)
 	}
 }
 

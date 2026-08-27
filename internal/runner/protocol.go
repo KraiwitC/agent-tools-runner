@@ -395,6 +395,10 @@ func ExecuteRequest(workspace string, request Request) string {
 	}
 	maxTransferChars := MaximumTransferChars()
 	for actionIndex, action := range request.Actions {
+		if isModifyingOperation(action.Operation) && !modifyingActionResultFits(response, action, actionIndex, maxTransferChars) {
+			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
+		}
+
 		result, responseError := executeAction(workspace, action, actionIndex)
 		if responseError != nil {
 			response.Results = append(response.Results, result)
@@ -437,6 +441,66 @@ func newTransferLimitError(action Action, actionIndex int) *ResponseError {
 		Code:        "TRANSFER_LIMIT_EXCEEDED",
 		Message:     "Response reached the configured transfer limit. The current result was truncated; any remaining actions were not executed.",
 	}
+}
+
+func isModifyingOperation(operation string) bool {
+	switch operation {
+	case "edit", "create", "copy", "move", "mkdir", "delete":
+		return true
+	default:
+		return false
+	}
+}
+
+func modifyingActionResultFits(response Response, action Action, actionIndex int, maxTransferChars int) bool {
+	candidate := response
+	candidate.Status = "limit"
+	candidate.Results = append(append([]ActionResult(nil), response.Results...), maximumModifyingActionResult(action))
+	candidate.Error = newTransferLimitError(action, actionIndex)
+	candidate.Error.Path = longestActionPath(action)
+	return len(marshalResponse(candidate)) <= maxTransferChars
+}
+
+func longestActionPath(action Action) string {
+	longestPath := action.Path
+	if len(action.Source) > len(longestPath) {
+		longestPath = action.Source
+	}
+	if len(action.Destination) > len(longestPath) {
+		longestPath = action.Destination
+	}
+	return filepath.ToSlash(filepath.Clean(longestPath))
+}
+
+func maximumModifyingActionResult(action Action) ActionResult {
+	result := ActionResult{
+		ID:        action.ID,
+		Operation: action.Operation,
+		Status:    "success",
+		Data:      &ActionData{},
+	}
+
+	switch action.Operation {
+	case "edit":
+		result.Data.Path = filepath.ToSlash(filepath.Clean(action.Path))
+		result.Data.SHA256 = strings.Repeat("0", sha256HexLength)
+		result.Data.ReplacementsApplied = maximumEditReplacements
+	case "create":
+		result.Data.Path = filepath.ToSlash(filepath.Clean(action.Path))
+		result.Data.SHA256 = strings.Repeat("0", sha256HexLength)
+		result.Data.BytesWritten = int(maximumFileSize)
+	case "copy", "move":
+		result.Data.Path = filepath.ToSlash(filepath.Clean(action.Destination))
+		result.Data.SHA256 = strings.Repeat("0", sha256HexLength)
+		result.Data.BytesWritten = int(maximumFileSize)
+	case "mkdir":
+		result.Data.Path = filepath.ToSlash(filepath.Clean(action.Path))
+		result.Data.Type = "directory"
+	case "delete":
+		result.Data.Path = filepath.ToSlash(filepath.Clean(action.Path))
+		result.Data.Type = "directory"
+	}
+	return result
 }
 
 func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars int) (ActionResult, bool) {
@@ -527,6 +591,8 @@ func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars 
 		} else {
 			data.EndLine = data.StartLine
 		}
+	default:
+		return result, false
 	}
 	return result, true
 }
