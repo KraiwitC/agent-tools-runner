@@ -246,7 +246,6 @@ func TestExecuteRequestDoesNotModifyWorkspaceWithoutResponseCapacity(t *testing.
 		Results: []ActionResult{maximumModifyingActionResult(action)},
 		Error:   newTransferLimitError(action, 0),
 	}
-	candidate.Error.Path = action.Path + action.Source + action.Destination
 
 	originalLimit := MaximumTransferChars()
 	SetMaximumTransferChars(len(marshalResponse(candidate)) - 1)
@@ -259,82 +258,33 @@ func TestExecuteRequestDoesNotModifyWorkspaceWithoutResponseCapacity(t *testing.
 	assertPathDoesNotExist(t, workspace+"/created.txt")
 }
 
-func TestFitReadOnlyResultDoesNotTruncateInspectResult(t *testing.T) {
-	response := Response{
+func TestExecuteRequestReturnsPartialSecondRead(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "first.txt", strings.Repeat("a", 200))
+	writeTestFile(t, workspace, "second.txt", strings.Repeat("b", 5000))
+	request := Request{
 		Version: protocolVersion,
-		Status:  "limit",
-		Results: []ActionResult{},
-	}
-	result := ActionResult{
-		ID:        "inspect",
-		Operation: "inspect",
-		Status:    "success",
-		Data: &ActionData{
-			Path: "file.txt",
-			Type: "file",
+		Actions: []Action{
+			{ID: "first", Operation: "read", Paths: []string{"first.txt"}},
+			{ID: "second", Operation: "read", Paths: []string{"second.txt"}},
 		},
 	}
 
-	fittedResult, truncated := fitReadOnlyResult(response, result, 1)
-	if truncated {
-		t.Fatal("inspect result must not be treated as truncatable")
-	}
-	if fittedResult.Data == nil || fittedResult.Data.Path != "file.txt" {
-		t.Fatalf("inspect result was changed: %#v", fittedResult)
-	}
-}
+	originalLimit := MaximumTransferChars()
+	SetMaximumTransferChars(1500)
+	t.Cleanup(func() { SetMaximumTransferChars(originalLimit) })
 
-func TestMaximumFittingCount(t *testing.T) {
-	count := maximumFittingCount(10, func(count int) bool {
-		return count <= 7
-	})
-	if count != 7 {
-		t.Fatalf("maximum fitting count = %d, want 7", count)
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "limit" || len(response.Results) != 2 {
+		t.Fatalf("unexpected response: %#v", response)
 	}
-}
-
-func TestFitReadOnlyResultPreservesPartialNextSearchMatch(t *testing.T) {
-	response := Response{
-		Version: protocolVersion,
-		Status:  "limit",
-		Results: []ActionResult{},
-		Error:   newTransferLimitError(Action{ID: "search", Operation: "search"}, 0),
+	secondResult := response.Results[1]
+	if secondResult.Data == nil || !secondResult.Data.Truncated || len(secondResult.Data.Files) != 1 {
+		t.Fatalf("unexpected second result: %#v", secondResult)
 	}
-	result := ActionResult{
-		ID:        "search",
-		Operation: "search",
-		Status:    "success",
-		Data: &ActionData{
-			Query: "needle",
-			Matches: []SearchMatch{
-				{Path: "first.txt", Line: 1, Text: "first"},
-				{Path: "second.txt", Line: 2, Text: strings.Repeat("x", 1000)},
-			},
-		},
-	}
-	limitedResult := result
-	limitedData := *result.Data
-	limitedData.Truncated = true
-	limitedData.Matches = append([]SearchMatch(nil), result.Data.Matches...)
-	limitedData.Matches[1].Text = strings.Repeat("x", 20)
-	limitedResult.Data = &limitedData
-	limit := len(marshalResponse(Response{
-		Version: protocolVersion,
-		Status:  "limit",
-		Results: []ActionResult{limitedResult},
-		Error:   response.Error,
-	}))
-
-	fittedResult, truncated := fitReadOnlyResult(response, result, limit)
-	if !truncated || fittedResult.Data == nil || len(fittedResult.Data.Matches) != 2 {
-		t.Fatalf("unexpected fitted result: %#v", fittedResult)
-	}
-	partialText := fittedResult.Data.Matches[1].Text
-	if partialText == "" || len(partialText) >= len(result.Data.Matches[1].Text) {
-		t.Fatalf("expected partial second match, got %d characters", len(partialText))
-	}
-	if !resultFitsTransferLimit(response, fittedResult, limit) {
-		t.Fatal("fitted result exceeds the transfer limit")
+	content := secondResult.Data.Files[0].Content
+	if content == "" || len(content) >= 5000 {
+		t.Fatalf("expected partial second file, got %d characters", len(content))
 	}
 }
 

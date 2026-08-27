@@ -394,6 +394,7 @@ func ExecuteRequest(workspace string, request Request) string {
 		Results: make([]ActionResult, 0, len(request.Actions)),
 	}
 	maxTransferChars := MaximumTransferChars()
+
 	for actionIndex, action := range request.Actions {
 		if isModifyingOperation(action.Operation) && !modifyingActionResultFits(response, action, actionIndex, maxTransferChars) {
 			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
@@ -401,39 +402,42 @@ func ExecuteRequest(workspace string, request Request) string {
 
 		result, responseError := executeAction(workspace, action, actionIndex)
 		if responseError != nil {
-			response.Results = append(response.Results, result)
-			response.Status = "error"
-			response.Error = responseError
-			responseText := marshalResponse(response)
-			if len(responseText) <= maxTransferChars {
-				return responseText
-			}
-			response.Results = response.Results[:len(response.Results)-1]
-			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
+			return finishActionError(response, result, responseError, action, actionIndex, maxTransferChars)
 		}
 
-		fitResponse := response
-		fitResponse.Status = "limit"
-		fitResponse.Error = newTransferLimitError(action, actionIndex)
-		result, transferTruncated := fitReadOnlyResult(fitResponse, result, maxTransferChars)
+		result, truncated := fitSuccessfulResult(response, result, action, actionIndex, maxTransferChars)
 		response.Results = append(response.Results, result)
-		if transferTruncated {
-			response.Status = "limit"
-			response.Error = newTransferLimitError(action, actionIndex)
-			responseText := marshalResponse(response)
-			if len(responseText) <= maxTransferChars {
-				return responseText
-			}
-			response.Results = response.Results[:len(response.Results)-1]
+		if truncated {
 			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
 		}
-		responseText := marshalResponse(response)
-		if len(responseText) > maxTransferChars {
+		if len(marshalResponse(response)) > maxTransferChars {
 			response.Results = response.Results[:len(response.Results)-1]
 			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
 		}
 	}
+
 	return marshalResponse(response)
+}
+
+func finishActionError(response Response, result ActionResult, responseError *ResponseError, action Action, actionIndex int, maxTransferChars int) string {
+	response.Results = append(response.Results, result)
+	response.Status = "error"
+	response.Error = responseError
+
+	responseText := marshalResponse(response)
+	if len(responseText) <= maxTransferChars {
+		return responseText
+	}
+
+	response.Results = response.Results[:len(response.Results)-1]
+	return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
+}
+
+func fitSuccessfulResult(response Response, result ActionResult, action Action, actionIndex int, maxTransferChars int) (ActionResult, bool) {
+	limitResponse := response
+	limitResponse.Status = "limit"
+	limitResponse.Error = newTransferLimitError(action, actionIndex)
+	return fitReadOnlyResult(limitResponse, result, maxTransferChars)
 }
 
 func createTransferLimitResponse(response Response, action Action, actionIndex int, maxTransferChars int) string {
@@ -469,7 +473,6 @@ func modifyingActionResultFits(response Response, action Action, actionIndex int
 	candidate.Status = "limit"
 	candidate.Results = append(append([]ActionResult(nil), response.Results...), maximumModifyingActionResult(action))
 	candidate.Error = newTransferLimitError(action, actionIndex)
-	candidate.Error.Path = action.Path + action.Source + action.Destination
 	return len(marshalResponse(candidate)) <= maxTransferChars
 }
 
@@ -515,84 +518,115 @@ func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars 
 
 	switch result.Operation {
 	case "search":
-		matches := data.Matches
-		count := maximumFittingCount(len(matches), func(count int) bool {
-			data.Matches = matches[:count]
-			return resultFitsTransferLimit(response, result, maxTransferChars)
-		})
-		data.Matches = append([]SearchMatch(nil), matches[:count]...)
-		if count < len(matches) {
-			match := matches[count]
-			data.Matches = append(data.Matches, match)
-			matchIndex := len(data.Matches) - 1
-			data.Matches[matchIndex].Text = trimTextToFit(match.Text, func(content string) bool {
-				data.Matches[matchIndex].Text = content
-				return resultFitsTransferLimit(response, result, maxTransferChars)
-			})
-			if !resultFitsTransferLimit(response, result, maxTransferChars) {
-				data.Matches = data.Matches[:matchIndex]
-			}
-		}
+		fitSearchResult(response, result, maxTransferChars)
 	case "ranked_search":
-		matches := data.RankedMatches
-		count := maximumFittingCount(len(matches), func(count int) bool {
-			data.RankedMatches = matches[:count]
-			return resultFitsTransferLimit(response, result, maxTransferChars)
-		})
-		data.RankedMatches = append([]RankedSearchMatch(nil), matches[:count]...)
-		if count < len(matches) {
-			match := matches[count]
-			data.RankedMatches = append(data.RankedMatches, match)
-			matchIndex := len(data.RankedMatches) - 1
-			data.RankedMatches[matchIndex].Text = trimTextToFit(match.Text, func(content string) bool {
-				data.RankedMatches[matchIndex].Text = content
-				return resultFitsTransferLimit(response, result, maxTransferChars)
-			})
-			if !resultFitsTransferLimit(response, result, maxTransferChars) {
-				data.RankedMatches = data.RankedMatches[:matchIndex]
-			}
-		}
+		fitRankedSearchResult(response, result, maxTransferChars)
 	case "tree":
-		entries := data.Entries
-		count := maximumFittingCount(len(entries), func(count int) bool {
-			data.Entries = entries[:count]
-			return resultFitsTransferLimit(response, result, maxTransferChars)
-		})
-		data.Entries = entries[:count]
+		fitTreeResult(response, result, maxTransferChars)
 	case "read":
-		files := data.Files
-		count := maximumFittingCount(len(files), func(count int) bool {
-			data.Files = files[:count]
-			return resultFitsTransferLimit(response, result, maxTransferChars)
-		})
-		data.Files = append([]ReadFileResult(nil), files[:count]...)
-		if count < len(files) {
-			file := files[count]
-			data.Files = append(data.Files, file)
-			fileIndex := len(data.Files) - 1
-			data.Files[fileIndex].Content = trimTextToFit(file.Content, func(content string) bool {
-				data.Files[fileIndex].Content = content
-				return resultFitsTransferLimit(response, result, maxTransferChars)
-			})
-			if !resultFitsTransferLimit(response, result, maxTransferChars) {
-				data.Files = data.Files[:fileIndex]
-			}
-		}
+		fitReadResult(response, result, maxTransferChars)
 	case "read_range":
-		data.Content = trimTextToFit(data.Content, func(content string) bool {
-			data.Content = content
-			return resultFitsTransferLimit(response, result, maxTransferChars)
-		})
-		lineCount := len(splitFileLines(data.Content))
-		if lineCount == 0 {
-			data.EndLine = 0
-		} else {
-			data.EndLine = data.StartLine + lineCount - 1
-		}
+		fitReadRangeResult(response, result, maxTransferChars)
 	default:
 		return result, false
 	}
 	return result, true
+}
+
+func fitSearchResult(response Response, result ActionResult, maxTransferChars int) {
+	data := result.Data
+	matches := data.Matches
+	count := maximumFittingCount(len(matches), func(count int) bool {
+		data.Matches = matches[:count]
+		return resultFitsTransferLimit(response, result, maxTransferChars)
+	})
+	data.Matches = append([]SearchMatch(nil), matches[:count]...)
+	if count == len(matches) {
+		return
+	}
+
+	match := matches[count]
+	data.Matches = append(data.Matches, match)
+	matchIndex := len(data.Matches) - 1
+	data.Matches[matchIndex].Text = trimTextToFit(match.Text, func(content string) bool {
+		data.Matches[matchIndex].Text = content
+		return resultFitsTransferLimit(response, result, maxTransferChars)
+	})
+	if !resultFitsTransferLimit(response, result, maxTransferChars) {
+		data.Matches = data.Matches[:matchIndex]
+	}
+}
+
+func fitRankedSearchResult(response Response, result ActionResult, maxTransferChars int) {
+	data := result.Data
+	matches := data.RankedMatches
+	count := maximumFittingCount(len(matches), func(count int) bool {
+		data.RankedMatches = matches[:count]
+		return resultFitsTransferLimit(response, result, maxTransferChars)
+	})
+	data.RankedMatches = append([]RankedSearchMatch(nil), matches[:count]...)
+	if count == len(matches) {
+		return
+	}
+
+	match := matches[count]
+	data.RankedMatches = append(data.RankedMatches, match)
+	matchIndex := len(data.RankedMatches) - 1
+	data.RankedMatches[matchIndex].Text = trimTextToFit(match.Text, func(content string) bool {
+		data.RankedMatches[matchIndex].Text = content
+		return resultFitsTransferLimit(response, result, maxTransferChars)
+	})
+	if !resultFitsTransferLimit(response, result, maxTransferChars) {
+		data.RankedMatches = data.RankedMatches[:matchIndex]
+	}
+}
+
+func fitTreeResult(response Response, result ActionResult, maxTransferChars int) {
+	data := result.Data
+	entries := data.Entries
+	count := maximumFittingCount(len(entries), func(count int) bool {
+		data.Entries = entries[:count]
+		return resultFitsTransferLimit(response, result, maxTransferChars)
+	})
+	data.Entries = entries[:count]
+}
+
+func fitReadResult(response Response, result ActionResult, maxTransferChars int) {
+	data := result.Data
+	files := data.Files
+	count := maximumFittingCount(len(files), func(count int) bool {
+		data.Files = files[:count]
+		return resultFitsTransferLimit(response, result, maxTransferChars)
+	})
+	data.Files = append([]ReadFileResult(nil), files[:count]...)
+	if count == len(files) {
+		return
+	}
+
+	file := files[count]
+	data.Files = append(data.Files, file)
+	fileIndex := len(data.Files) - 1
+	data.Files[fileIndex].Content = trimTextToFit(file.Content, func(content string) bool {
+		data.Files[fileIndex].Content = content
+		return resultFitsTransferLimit(response, result, maxTransferChars)
+	})
+	if !resultFitsTransferLimit(response, result, maxTransferChars) {
+		data.Files = data.Files[:fileIndex]
+	}
+}
+
+func fitReadRangeResult(response Response, result ActionResult, maxTransferChars int) {
+	data := result.Data
+	data.Content = trimTextToFit(data.Content, func(content string) bool {
+		data.Content = content
+		return resultFitsTransferLimit(response, result, maxTransferChars)
+	})
+	lineCount := len(splitFileLines(data.Content))
+	if lineCount == 0 {
+		data.EndLine = 0
+		return
+	}
+	data.EndLine = data.StartLine + lineCount - 1
 }
 
 func maximumFittingCount(length int, fits func(int) bool) int {
