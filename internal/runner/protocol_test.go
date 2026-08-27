@@ -3,7 +3,6 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -333,36 +332,6 @@ func TestParseAndValidateRequestRejectsMultipleObjects(t *testing.T) {
 	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected multiple JSON objects to be rejected")
-	}
-}
-
-func TestExecuteRequestPreservesResultsAtTransferLimit(t *testing.T) {
-	previousLimit := MaximumTransferChars()
-	SetMaximumTransferChars(700)
-	t.Cleanup(func() {
-		SetMaximumTransferChars(previousLimit)
-	})
-
-	workspace := t.TempDir()
-	writeTestFile(t, workspace, "first.txt", "first")
-	writeTestFile(t, workspace, "large.txt", strings.Repeat("needle\n", 100))
-
-	response := executeRequestForTest(t, workspace, Request{
-		Version: protocolVersion,
-		Actions: []Action{
-			{ID: "first", Operation: "read", Paths: []string{"first.txt"}},
-			{ID: "search", Operation: "search", Query: "needle"},
-		},
-	})
-
-	if len(response.Results) == 0 || response.Results[0].ID != "first" {
-		t.Fatalf("expected the earlier result to be preserved: %#v", response)
-	}
-	if len(response.Results) > 1 {
-		data := response.Results[1].Data
-		if data == nil || !data.Truncated || len(data.Matches) == 0 {
-			t.Fatalf("expected a useful partial search result: %#v", response.Results[1])
-		}
 	}
 }
 

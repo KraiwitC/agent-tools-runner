@@ -403,8 +403,16 @@ func ExecuteRequest(workspace string, request Request) string {
 			break
 		}
 
-		result = fitReadOnlyResult(response, result, maxTransferChars)
+		fitResponse := response
+		fitResponse.Status = "limit"
+		fitResponse.Error = newTransferLimitError(action, actionIndex)
+		result, transferTruncated := fitReadOnlyResult(fitResponse, result, maxTransferChars)
 		response.Results = append(response.Results, result)
+		if transferTruncated {
+			response.Status = "limit"
+			response.Error = newTransferLimitError(action, actionIndex)
+			return marshalResponse(response)
+		}
 		if len(marshalResponse(response)) > maxTransferChars {
 			response.Results = response.Results[:len(response.Results)-1]
 			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
@@ -415,24 +423,25 @@ func ExecuteRequest(workspace string, request Request) string {
 
 func createTransferLimitResponse(response Response, action Action, actionIndex int, maxTransferChars int) string {
 	response.Status = "limit"
-	response.Error = &ResponseError{
-		ActionID:    action.ID,
-		ActionIndex: actionIndex,
-		Code:        "TRANSFER_LIMIT_EXCEEDED",
-		Message:     "Response exceeded the configured transfer limit. Remaining actions were not executed.",
-	}
-	for len(response.Results) > 0 && len(marshalResponse(response)) > maxTransferChars {
-		response.Results = response.Results[:len(response.Results)-1]
-	}
+	response.Error = newTransferLimitError(action, actionIndex)
 	if len(marshalResponse(response)) <= maxTransferChars {
 		return marshalResponse(response)
 	}
 	return createTransferLimitErrorResponse(maxTransferChars)
 }
 
-func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars int) ActionResult {
+func newTransferLimitError(action Action, actionIndex int) *ResponseError {
+	return &ResponseError{
+		ActionID:    action.ID,
+		ActionIndex: actionIndex,
+		Code:        "TRANSFER_LIMIT_EXCEEDED",
+		Message:     "Response reached the configured transfer limit. The current result was truncated; any remaining actions were not executed.",
+	}
+}
+
+func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars int) (ActionResult, bool) {
 	if result.Data == nil || resultFitsTransferLimit(response, result, maxTransferChars) {
-		return result
+		return result, false
 	}
 
 	data := *result.Data
@@ -445,20 +454,38 @@ func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars 
 		data.Matches = nil
 		for _, match := range matches {
 			data.Matches = append(data.Matches, match)
-			if !resultFitsTransferLimit(response, result, maxTransferChars) {
-				data.Matches = data.Matches[:len(data.Matches)-1]
-				break
+			if resultFitsTransferLimit(response, result, maxTransferChars) {
+				continue
 			}
+
+			matchIndex := len(data.Matches) - 1
+			data.Matches[matchIndex].Text = trimTextToFit(match.Text, func(content string) bool {
+				data.Matches[matchIndex].Text = content
+				return resultFitsTransferLimit(response, result, maxTransferChars)
+			})
+			if !resultFitsTransferLimit(response, result, maxTransferChars) {
+				data.Matches = data.Matches[:matchIndex]
+			}
+			break
 		}
 	case "ranked_search":
 		matches := data.RankedMatches
 		data.RankedMatches = nil
 		for _, match := range matches {
 			data.RankedMatches = append(data.RankedMatches, match)
-			if !resultFitsTransferLimit(response, result, maxTransferChars) {
-				data.RankedMatches = data.RankedMatches[:len(data.RankedMatches)-1]
-				break
+			if resultFitsTransferLimit(response, result, maxTransferChars) {
+				continue
 			}
+
+			matchIndex := len(data.RankedMatches) - 1
+			data.RankedMatches[matchIndex].Text = trimTextToFit(match.Text, func(content string) bool {
+				data.RankedMatches[matchIndex].Text = content
+				return resultFitsTransferLimit(response, result, maxTransferChars)
+			})
+			if !resultFitsTransferLimit(response, result, maxTransferChars) {
+				data.RankedMatches = data.RankedMatches[:matchIndex]
+			}
+			break
 		}
 	case "tree":
 		entries := data.Entries
@@ -501,15 +528,22 @@ func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars 
 			data.EndLine = data.StartLine
 		}
 	}
-	return result
+	return result, true
 }
 
 func trimTextToFit(content string, fits func(string) bool) string {
 	runes := []rune(content)
-	for len(runes) > 0 && !fits(string(runes)) {
-		runes = runes[:len(runes)-1]
+	low := 0
+	high := len(runes)
+	for low < high {
+		middle := low + (high-low+1)/2
+		if fits(string(runes[:middle])) {
+			low = middle
+		} else {
+			high = middle - 1
+		}
 	}
-	return string(runes)
+	return string(runes[:low])
 }
 
 func resultFitsTransferLimit(response Response, result ActionResult, maxTransferChars int) bool {
