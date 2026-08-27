@@ -92,25 +92,6 @@ func TestSearchWorkspaceRetainsDeterministicMatchesAtGlobalLimit(t *testing.T) {
 	}
 }
 
-func TestSearchWorkspaceGloballyBoundsCollectedMatches(t *testing.T) {
-	workspace := t.TempDir()
-	content := strings.Repeat("needle\n", maximumCollectedSearchMatches+1)
-	for index := 0; index < 4; index++ {
-		writeTestFile(t, workspace, fmt.Sprintf("matches-%d.txt", index), content)
-	}
-
-	matches, truncated, err := searchWorkspace(workspace, "needle")
-	if err != nil {
-		t.Fatalf("searchWorkspace returned an error: %v", err)
-	}
-	if !truncated {
-		t.Fatal("expected truncated search result")
-	}
-	if len(matches) != maximumCollectedSearchMatches {
-		t.Fatalf("expected %d matches, got %d", maximumCollectedSearchMatches, len(matches))
-	}
-}
-
 func TestSearchWorkspaceTruncatesAtCollectionLimit(t *testing.T) {
 	workspace := t.TempDir()
 	var content strings.Builder

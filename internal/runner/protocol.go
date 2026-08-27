@@ -457,19 +457,8 @@ func modifyingActionResultFits(response Response, action Action, actionIndex int
 	candidate.Status = "limit"
 	candidate.Results = append(append([]ActionResult(nil), response.Results...), maximumModifyingActionResult(action))
 	candidate.Error = newTransferLimitError(action, actionIndex)
-	candidate.Error.Path = longestActionPath(action)
+	candidate.Error.Path = action.Path + action.Source + action.Destination
 	return len(marshalResponse(candidate)) <= maxTransferChars
-}
-
-func longestActionPath(action Action) string {
-	longestPath := action.Path
-	if len(action.Source) > len(longestPath) {
-		longestPath = action.Source
-	}
-	if len(action.Destination) > len(longestPath) {
-		longestPath = action.Destination
-	}
-	return filepath.ToSlash(filepath.Clean(longestPath))
 }
 
 func maximumModifyingActionResult(action Action) ActionResult {

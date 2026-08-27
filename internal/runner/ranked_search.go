@@ -75,53 +75,36 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 		workerCount = len(files)
 	}
 
-	jobs := make(chan string, len(files))
-	for _, file := range files {
-		jobs <- file
-	}
-	close(jobs)
-
 	collectionLimit := maximumCollectedRankedSearchMatches + 1
-	var mu sync.Mutex
-	var matches []RankedSearchMatch
-	var searchErr error
-	var wg sync.WaitGroup
+	matches := make([]RankedSearchMatch, 0, collectionLimit)
+	for batchStart := 0; batchStart < len(files); batchStart += workerCount {
+		batchEnd := min(batchStart+workerCount, len(files))
+		batchMatches := make([][]RankedSearchMatch, batchEnd-batchStart)
+		batchErrors := make([]error, batchEnd-batchStart)
+		var wg sync.WaitGroup
 
-	for i := 0; i < workerCount; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for path := range jobs {
-				mu.Lock()
-				stopped := searchErr != nil
-				mu.Unlock()
-				if stopped {
-					continue
-				}
+		for fileIndex := batchStart; fileIndex < batchEnd; fileIndex++ {
+			batchIndex := fileIndex - batchStart
+			wg.Add(1)
+			go func(batchIndex int, fileIndex int) {
+				defer wg.Done()
+				batchMatches[batchIndex], batchErrors[batchIndex] = rankedSearchFile(workspace, files[fileIndex], query, collectionLimit)
+			}(batchIndex, fileIndex)
+		}
+		wg.Wait()
 
-				fileMatches, err := rankedSearchFile(workspace, path, query, collectionLimit)
-				mu.Lock()
-				if err != nil && searchErr == nil {
-					searchErr = err
-				}
-				if err == nil && len(fileMatches) > 0 {
-					matches = append(matches, fileMatches...)
-					sortRankedSearchMatches(matches)
-					if len(matches) > collectionLimit {
-						matches = matches[:collectionLimit]
-					}
-				}
-				mu.Unlock()
+		for batchIndex, fileMatches := range batchMatches {
+			if batchErrors[batchIndex] != nil {
+				return nil, false, batchErrors[batchIndex]
 			}
-		}()
+			matches = append(matches, fileMatches...)
+		}
+		sortRankedSearchMatches(matches)
+		if len(matches) > collectionLimit {
+			matches = matches[:collectionLimit]
+		}
 	}
-	wg.Wait()
 
-	if searchErr != nil {
-		return nil, false, searchErr
-	}
-
-	sortRankedSearchMatches(matches)
 	truncated := len(matches) > maximumCollectedRankedSearchMatches
 	if truncated {
 		matches = matches[:maximumCollectedRankedSearchMatches]

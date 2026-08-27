@@ -145,8 +145,8 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 	return allMatches, truncated, nil
 }
 
-func searchFile(workspace string, path string, query string, remainingMatches int) ([]SearchMatch, error) {
-	if remainingMatches <= 0 {
+func searchFile(workspace string, path string, query string, matchLimit int) ([]SearchMatch, error) {
+	if matchLimit <= 0 {
 		return nil, nil
 	}
 
@@ -182,7 +182,7 @@ func searchFile(workspace string, path string, query string, remainingMatches in
 				Line: lineNumber,
 				Text: line,
 			})
-			if len(matches) >= remainingMatches {
+			if len(matches) >= matchLimit {
 				break
 			}
 		}

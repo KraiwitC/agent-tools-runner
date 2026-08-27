@@ -246,7 +246,7 @@ func TestExecuteRequestDoesNotModifyWorkspaceWithoutResponseCapacity(t *testing.
 		Results: []ActionResult{maximumModifyingActionResult(action)},
 		Error:   newTransferLimitError(action, 0),
 	}
-	candidate.Error.Path = longestActionPath(action)
+	candidate.Error.Path = action.Path + action.Source + action.Destination
 
 	originalLimit := MaximumTransferChars()
 	SetMaximumTransferChars(len(marshalResponse(candidate)) - 1)
