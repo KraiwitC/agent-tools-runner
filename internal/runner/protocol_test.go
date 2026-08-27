@@ -288,6 +288,53 @@ func TestExecuteRequestReturnsPartialSecondRead(t *testing.T) {
 	}
 }
 
+func TestExecuteRequestTruncatesReadRangeAtLineBoundary(t *testing.T) {
+	workspace := t.TempDir()
+	line := strings.Repeat("x", 1000) + "\n"
+	content := line + line
+	writeTestFile(t, workspace, "lines.txt", content)
+	request := Request{
+		Version: protocolVersion,
+		Actions: []Action{
+			{ID: "read-range", Operation: "read_range", Path: "lines.txt", StartLine: 1, EndLine: 2},
+		},
+	}
+	oneLineResponse := Response{
+		Version: protocolVersion,
+		Status:  "limit",
+		Results: []ActionResult{
+			{
+				ID:        "read-range",
+				Operation: "read_range",
+				Status:    "success",
+				Data: &ActionData{
+					Path:       "lines.txt",
+					Content:    line,
+					StartLine:  1,
+					EndLine:    1,
+					TotalLines: 2,
+					SHA256:     calculateSHA256([]byte(content)),
+					Truncated:  true,
+				},
+			},
+		},
+		Error: newTransferLimitError(request.Actions[0], 0),
+	}
+
+	originalLimit := MaximumTransferChars()
+	SetMaximumTransferChars(len(marshalResponse(oneLineResponse)))
+	t.Cleanup(func() { SetMaximumTransferChars(originalLimit) })
+
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "limit" || len(response.Results) != 1 {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	data := response.Results[0].Data
+	if data == nil || !data.Truncated || data.Content != line || data.EndLine != 1 {
+		t.Fatalf("unexpected truncated range: %#v", data)
+	}
+}
+
 func TestExecuteRequestDropsOversizedErrorResult(t *testing.T) {
 	workspace := t.TempDir()
 	request := Request{
