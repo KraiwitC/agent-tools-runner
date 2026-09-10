@@ -68,6 +68,11 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 				MatchType:   matchType,
 				Score:       score,
 			})
+			collectionLimit := maximumCollectedRankedSearchMatches + 1
+			if len(pathMatches) > collectionLimit {
+				sortRankedSearchMatches(pathMatches)
+				pathMatches = pathMatches[:collectionLimit]
+			}
 		}
 
 		if entry.IsDir() || !entry.Type().IsRegular() {

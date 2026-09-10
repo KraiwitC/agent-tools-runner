@@ -121,6 +121,28 @@ func TestSearchWorkspaceRetainsDeterministicMatchesAtGlobalLimit(t *testing.T) {
 	}
 }
 
+func TestSearchWorkspaceDoesNotLetLaterPathMatchesCrowdOutEarlierContent(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "a-first.txt", "needle\n")
+	for index := 0; index < maximumCollectedSearchMatches+1; index++ {
+		writeTestFile(t, workspace, fmt.Sprintf("z-needle-%04d.txt", index), "unrelated\n")
+	}
+
+	matches, truncated, err := searchWorkspace(workspace, "needle")
+	if err != nil {
+		t.Fatalf("searchWorkspace returned an error: %v", err)
+	}
+	if !truncated {
+		t.Fatal("expected truncated search result")
+	}
+	if len(matches) != maximumCollectedSearchMatches {
+		t.Fatalf("expected %d matches, got %d", maximumCollectedSearchMatches, len(matches))
+	}
+	if matches[0].Path != "a-first.txt" || matches[0].Line != 1 || matches[0].MatchTarget != "content" {
+		t.Fatalf("earlier content match was crowded out: %#v", matches[0])
+	}
+}
+
 func TestSearchWorkspaceTruncatesAtCollectionLimit(t *testing.T) {
 	workspace := t.TempDir()
 	var content strings.Builder

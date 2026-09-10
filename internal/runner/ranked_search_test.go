@@ -211,6 +211,28 @@ func TestRankedSearchWorkspaceRetainsBestMatchesWithinGlobalLimit(t *testing.T) 
 	}
 }
 
+func TestRankedSearchWorkspaceRetainsLateBestPathWithinLimit(t *testing.T) {
+	workspace := t.TempDir()
+	for index := 0; index < maximumCollectedRankedSearchMatches+1; index++ {
+		writeTestFile(t, workspace, fmt.Sprintf("a-EXECUTEMOVEACTION-%03d/file.txt", index), "unrelated\n")
+	}
+	writeTestFile(t, workspace, "z-executeMoveAction/file.txt", "unrelated\n")
+
+	matches, truncated, err := rankedSearchWorkspace(workspace, "executeMoveAction")
+	if err != nil {
+		t.Fatalf("rankedSearchWorkspace returned an error: %v", err)
+	}
+	if !truncated {
+		t.Fatal("expected ranked results to be truncated")
+	}
+	if len(matches) != maximumCollectedRankedSearchMatches {
+		t.Fatalf("matches = %d, want %d", len(matches), maximumCollectedRankedSearchMatches)
+	}
+	if matches[0].Path != "z-executeMoveAction" || matches[0].MatchTarget != "path" || matches[0].MatchType != "exact" {
+		t.Fatalf("late best path match was not retained: %#v", matches[0])
+	}
+}
+
 func TestRankedSearchWorkspaceTruncatesAtCollectionLimit(t *testing.T) {
 	workspace := t.TempDir()
 	var content strings.Builder
