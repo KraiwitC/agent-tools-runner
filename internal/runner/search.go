@@ -7,10 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
-	"sort"
 	"strings"
-	"sync"
 	"unicode/utf8"
 )
 
@@ -58,7 +55,8 @@ func executeSearchAction(workspace string, action Action, actionIndex int) ([]Se
 }
 
 func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error) {
-	var files []string
+	collectionLimit := maximumCollectedSearchMatches + 1
+	matches := make([]SearchMatch, 0, collectionLimit)
 	err := filepath.WalkDir(workspace, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -72,77 +70,48 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 			}
 			return nil
 		}
-		if entry.IsDir() {
-			if isSearchExcludedDirectory(entry.Name()) {
-				return filepath.SkipDir
+		if entry.IsDir() && isSearchExcludedDirectory(entry.Name()) {
+			return filepath.SkipDir
+		}
+
+		relativePath, err := filepath.Rel(workspace, path)
+		if err != nil {
+			return err
+		}
+		normalizedPath := filepath.ToSlash(relativePath)
+		if strings.Contains(normalizedPath, query) {
+			matches = append(matches, SearchMatch{
+				Path:        normalizedPath,
+				MatchTarget: "path",
+			})
+			if len(matches) >= collectionLimit {
+				return fs.SkipAll
 			}
+		}
+
+		if entry.IsDir() || !entry.Type().IsRegular() {
 			return nil
 		}
-		if !entry.Type().IsRegular() {
-			return nil
+		remainingMatches := collectionLimit - len(matches)
+		fileMatches, err := searchFile(workspace, path, query, remainingMatches)
+		if err != nil {
+			return err
 		}
-		files = append(files, path)
+		matches = append(matches, fileMatches...)
+		if len(matches) >= collectionLimit {
+			return fs.SkipAll
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, false, err
 	}
 
-	if len(files) == 0 {
-		return []SearchMatch{}, false, nil
-	}
-
-	workerCount := runtime.NumCPU()
-	if workerCount > len(files) {
-		workerCount = len(files)
-	}
-
-	collectionLimit := maximumCollectedSearchMatches + 1
-	allMatches := make([]SearchMatch, 0, collectionLimit)
-	for batchStart := 0; batchStart < len(files) && len(allMatches) < collectionLimit; batchStart += workerCount {
-		batchEnd := min(batchStart+workerCount, len(files))
-		batchMatches := make([][]SearchMatch, batchEnd-batchStart)
-		batchErrors := make([]error, batchEnd-batchStart)
-		var wg sync.WaitGroup
-
-		for fileIndex := batchStart; fileIndex < batchEnd; fileIndex++ {
-			batchIndex := fileIndex - batchStart
-			wg.Add(1)
-			go func(batchIndex int, fileIndex int) {
-				defer wg.Done()
-				batchMatches[batchIndex], batchErrors[batchIndex] = searchFile(workspace, files[fileIndex], query, collectionLimit)
-			}(batchIndex, fileIndex)
-		}
-		wg.Wait()
-
-		for batchIndex, fileMatches := range batchMatches {
-			if batchErrors[batchIndex] != nil {
-				return nil, false, batchErrors[batchIndex]
-			}
-			remainingMatches := collectionLimit - len(allMatches)
-			if len(fileMatches) > remainingMatches {
-				fileMatches = fileMatches[:remainingMatches]
-			}
-			allMatches = append(allMatches, fileMatches...)
-			if len(allMatches) >= collectionLimit {
-				break
-			}
-		}
-	}
-
-	sort.Slice(allMatches, func(i, j int) bool {
-		if allMatches[i].Path != allMatches[j].Path {
-			return allMatches[i].Path < allMatches[j].Path
-		}
-		return allMatches[i].Line < allMatches[j].Line
-	})
-
-	truncated := len(allMatches) > maximumCollectedSearchMatches
+	truncated := len(matches) > maximumCollectedSearchMatches
 	if truncated {
-		allMatches = allMatches[:maximumCollectedSearchMatches]
+		matches = matches[:maximumCollectedSearchMatches]
 	}
-
-	return allMatches, truncated, nil
+	return matches, truncated, nil
 }
 
 func searchFile(workspace string, path string, query string, matchLimit int) ([]SearchMatch, error) {
@@ -178,9 +147,10 @@ func searchFile(workspace string, path string, query string, matchLimit int) ([]
 		line := scanner.Text()
 		if strings.Contains(line, query) {
 			matches = append(matches, SearchMatch{
-				Path: filepath.ToSlash(relativePath),
-				Line: lineNumber,
-				Text: line,
+				Path:        filepath.ToSlash(relativePath),
+				Line:        lineNumber,
+				Text:        line,
+				MatchTarget: "content",
 			})
 			if len(matches) >= matchLimit {
 				break

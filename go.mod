@@ -1,6 +1,6 @@
 module agent-tools-runner
 
-go 1.27.0
+go 1.27.1
 
 require (
 	golang.design/x/clipboard v0.8.0

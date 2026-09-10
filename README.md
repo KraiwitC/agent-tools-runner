@@ -5,8 +5,8 @@ Agent Tools Runner (`atr`) is a human-in-the-loop agent harness that turns any c
 ## Supported operations
 
 - `tree`: List a bounded directory tree.
-- `search`: Search supported text files using case-sensitive literal matching.
-- `ranked_search`: Find confidence-ranked matches using exact, case-insensitive, identifier-aware, and fuzzy lexical matching.
+- `search`: Find case-sensitive literal matches in folder paths, file paths, and supported text-file content.
+- `ranked_search`: Find confidence-ranked matches in folder paths, file paths, and supported text-file content using exact, case-insensitive, identifier-aware, and fuzzy lexical matching.
 - `read`: Read one or more complete text files and return a SHA-256 hash for each file.
 - `read_range`: Read an inclusive one-based line range and return the complete-file SHA-256 hash.
 - `inspect`: Return file metadata and SHA-256, or report whether a directory is empty.
