@@ -37,6 +37,7 @@ func executeRankedSearchAction(workspace string, action Action, actionIndex int)
 
 func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch, bool, error) {
 	var files []string
+	pathMatches := make([]RankedSearchMatch, 0)
 	err := filepath.WalkDir(workspace, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -50,13 +51,26 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 			}
 			return nil
 		}
-		if entry.IsDir() {
-			if isSearchExcludedDirectory(entry.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
+		if entry.IsDir() && isSearchExcludedDirectory(entry.Name()) {
+			return filepath.SkipDir
 		}
-		if !entry.Type().IsRegular() {
+
+		relativePath, err := filepath.Rel(workspace, path)
+		if err != nil {
+			return err
+		}
+		normalizedPath := filepath.ToSlash(relativePath)
+		matchType, score, matched := rankSearchLine(query, normalizedPath)
+		if matched {
+			pathMatches = append(pathMatches, RankedSearchMatch{
+				Path:        normalizedPath,
+				MatchTarget: "path",
+				MatchType:   matchType,
+				Score:       score,
+			})
+		}
+
+		if entry.IsDir() || !entry.Type().IsRegular() {
 			return nil
 		}
 		files = append(files, path)
@@ -67,7 +81,12 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 	}
 
 	if len(files) == 0 {
-		return []RankedSearchMatch{}, false, nil
+		sortRankedSearchMatches(pathMatches)
+		truncated := len(pathMatches) > maximumCollectedRankedSearchMatches
+		if truncated {
+			pathMatches = pathMatches[:maximumCollectedRankedSearchMatches]
+		}
+		return pathMatches, truncated, nil
 	}
 
 	workerCount := runtime.NumCPU()
@@ -76,7 +95,8 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 	}
 
 	collectionLimit := maximumCollectedRankedSearchMatches + 1
-	matches := make([]RankedSearchMatch, 0, collectionLimit)
+	matches := make([]RankedSearchMatch, 0, len(pathMatches)+collectionLimit)
+	matches = append(matches, pathMatches...)
 	for batchStart := 0; batchStart < len(files); batchStart += workerCount {
 		batchEnd := min(batchStart+workerCount, len(files))
 		batchMatches := make([][]RankedSearchMatch, batchEnd-batchStart)
@@ -125,7 +145,10 @@ func sortRankedSearchMatches(matches []RankedSearchMatch) {
 		if matches[first].Path != matches[second].Path {
 			return matches[first].Path < matches[second].Path
 		}
-		return matches[first].Line < matches[second].Line
+		if matches[first].Line != matches[second].Line {
+			return matches[first].Line < matches[second].Line
+		}
+		return matches[first].MatchTarget < matches[second].MatchTarget
 	})
 }
 
@@ -159,11 +182,12 @@ func rankedSearchFile(workspace string, path string, query string, matchLimit in
 		matchType, score, matched := rankSearchLine(query, line)
 		if matched {
 			matches = append(matches, RankedSearchMatch{
-				Path:      filepath.ToSlash(relativePath),
-				Line:      lineNumber,
-				Text:      line,
-				MatchType: matchType,
-				Score:     score,
+				Path:        filepath.ToSlash(relativePath),
+				Line:        lineNumber,
+				Text:        line,
+				MatchTarget: "content",
+				MatchType:   matchType,
+				Score:       score,
 			})
 			if len(matches) >= matchLimit*2 {
 				sortRankedSearchMatches(matches)

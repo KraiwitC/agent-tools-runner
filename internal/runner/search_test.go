@@ -20,8 +20,37 @@ func TestSearchWorkspaceFindsLiteralText(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("expected one match, got %d", len(matches))
 	}
-	if matches[0].Path != "nested/example.txt" || matches[0].Line != 2 || matches[0].Text != "find me here" {
+	if matches[0].Path != "nested/example.txt" || matches[0].Line != 2 || matches[0].Text != "find me here" || matches[0].MatchTarget != "content" {
 		t.Fatalf("unexpected match: %#v", matches[0])
+	}
+}
+
+func TestSearchWorkspaceFindsMatchingFoldersAndFiles(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "services/payment-api/config.txt", "unrelated content\n")
+	writeTestFile(t, workspace, "services/payment-api/payment-api.yaml", "payment-api\n")
+
+	matches, truncated, err := searchWorkspace(workspace, "payment-api")
+	if err != nil {
+		t.Fatalf("searchWorkspace returned an error: %v", err)
+	}
+	if truncated {
+		t.Fatal("did not expect search results to be truncated")
+	}
+	if len(matches) != 4 {
+		t.Fatalf("expected four matches, got %#v", matches)
+	}
+	if matches[0].Path != "services/payment-api" || matches[0].MatchTarget != "path" {
+		t.Fatalf("unexpected folder match: %#v", matches[0])
+	}
+	if matches[1].Path != "services/payment-api/config.txt" || matches[1].MatchTarget != "path" {
+		t.Fatalf("unexpected descendant file match: %#v", matches[1])
+	}
+	if matches[2].Path != "services/payment-api/payment-api.yaml" || matches[2].MatchTarget != "path" {
+		t.Fatalf("unexpected file match: %#v", matches[2])
+	}
+	if matches[3].Path != "services/payment-api/payment-api.yaml" || matches[3].Line != 1 || matches[3].MatchTarget != "content" {
+		t.Fatalf("unexpected content match: %#v", matches[3])
 	}
 }
 

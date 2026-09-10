@@ -86,17 +86,19 @@ type TreeEntry struct {
 }
 
 type SearchMatch struct {
-	Path string `json:"path"`
-	Line int    `json:"line"`
-	Text string `json:"text"`
+	Path        string `json:"path"`
+	Line        int    `json:"line,omitempty"`
+	Text        string `json:"text,omitempty"`
+	MatchTarget string `json:"matchTarget"`
 }
 
 type RankedSearchMatch struct {
-	Path      string  `json:"path"`
-	Line      int     `json:"line"`
-	Text      string  `json:"text"`
-	MatchType string  `json:"matchType"`
-	Score     float64 `json:"score"`
+	Path        string  `json:"path"`
+	Line        int     `json:"line,omitempty"`
+	Text        string  `json:"text,omitempty"`
+	MatchTarget string  `json:"matchTarget"`
+	MatchType   string  `json:"matchType"`
+	Score       float64 `json:"score"`
 }
 
 type ReadFileResult struct {

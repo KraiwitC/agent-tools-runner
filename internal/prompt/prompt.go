@@ -68,10 +68,10 @@ Do not HTML-encode or decode text from ATR results. Preserve all text exactly as
 tree: List project structure without reading file contents.
 Example: {"id":"t1","operation":"tree","path":"."}
 
-search: Find exact text matches across the workspace. Case-sensitive.
+search: Find case-sensitive literal matches in folder paths, file paths, and supported text-file content.
 Example: {"id":"s1","operation":"search","query":"ServiceName"}
 
-ranked_search: Find matches using exact, case-insensitive, identifier-aware, and fuzzy matching. Query must contain at least 2 letters or digits. Returns confidence-sorted matches that fit within the response transfer limit. Always read the file before editing based on ranked results.
+ranked_search: Find matches in folder paths, file paths, and supported text-file content using exact, case-insensitive, identifier-aware, and fuzzy matching. Results use matchTarget to distinguish path matches from content matches. Query must contain at least 2 letters or digits. Returns confidence-sorted matches that fit within the response transfer limit. Always read the file before editing based on ranked results.
 Example: {"id":"rs1","operation":"ranked_search","query":"executeMoveActions"}
 
 read: Read one or more files. Batch related files in one action.

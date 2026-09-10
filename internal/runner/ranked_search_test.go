@@ -83,6 +83,43 @@ func TestTokenizeIdentifierSupportsCommonStyles(t *testing.T) {
 	}
 }
 
+func TestRankedSearchWorkspaceFindsMatchingFoldersAndFiles(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "services/payment_api/config.txt", "unrelated content\n")
+	writeTestFile(t, workspace, "services/payment_api/payment-api.yaml", "paymentApi\n")
+
+	matches, truncated, err := rankedSearchWorkspace(workspace, "payment api")
+	if err != nil {
+		t.Fatalf("rankedSearchWorkspace returned an error: %v", err)
+	}
+	if truncated {
+		t.Fatal("did not expect ranked results to be truncated")
+	}
+	if len(matches) != 4 {
+		t.Fatalf("expected four matches, got %#v", matches)
+	}
+
+	foundFolder := false
+	foundDescendantFile := false
+	foundMatchingFile := false
+	foundContent := false
+	for _, match := range matches {
+		switch {
+		case match.Path == "services/payment_api" && match.MatchTarget == "path":
+			foundFolder = true
+		case match.Path == "services/payment_api/config.txt" && match.MatchTarget == "path":
+			foundDescendantFile = true
+		case match.Path == "services/payment_api/payment-api.yaml" && match.MatchTarget == "path":
+			foundMatchingFile = true
+		case match.Path == "services/payment_api/payment-api.yaml" && match.Line == 1 && match.MatchTarget == "content":
+			foundContent = true
+		}
+	}
+	if !foundFolder || !foundDescendantFile || !foundMatchingFile || !foundContent {
+		t.Fatalf("missing expected path or content matches: %#v", matches)
+	}
+}
+
 func TestRankedSearchWorkspaceOrdersMatchesDeterministically(t *testing.T) {
 	workspace := t.TempDir()
 	writeTestFile(t, workspace, "b.go", "func execute_move_action() {}\n")

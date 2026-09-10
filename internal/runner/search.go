@@ -59,6 +59,7 @@ func executeSearchAction(workspace string, action Action, actionIndex int) ([]Se
 
 func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error) {
 	var files []string
+	pathMatches := make([]SearchMatch, 0)
 	err := filepath.WalkDir(workspace, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -72,13 +73,23 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 			}
 			return nil
 		}
-		if entry.IsDir() {
-			if isSearchExcludedDirectory(entry.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
+		if entry.IsDir() && isSearchExcludedDirectory(entry.Name()) {
+			return filepath.SkipDir
 		}
-		if !entry.Type().IsRegular() {
+
+		relativePath, err := filepath.Rel(workspace, path)
+		if err != nil {
+			return err
+		}
+		normalizedPath := filepath.ToSlash(relativePath)
+		if strings.Contains(normalizedPath, query) && len(pathMatches) < maximumCollectedSearchMatches+1 {
+			pathMatches = append(pathMatches, SearchMatch{
+				Path:        normalizedPath,
+				MatchTarget: "path",
+			})
+		}
+
+		if entry.IsDir() || !entry.Type().IsRegular() {
 			return nil
 		}
 		files = append(files, path)
@@ -89,7 +100,11 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 	}
 
 	if len(files) == 0 {
-		return []SearchMatch{}, false, nil
+		truncated := len(pathMatches) > maximumCollectedSearchMatches
+		if truncated {
+			pathMatches = pathMatches[:maximumCollectedSearchMatches]
+		}
+		return pathMatches, truncated, nil
 	}
 
 	workerCount := runtime.NumCPU()
@@ -98,7 +113,8 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 	}
 
 	collectionLimit := maximumCollectedSearchMatches + 1
-	allMatches := make([]SearchMatch, 0, collectionLimit)
+	allMatches := make([]SearchMatch, 0, len(pathMatches)+collectionLimit)
+	allMatches = append(allMatches, pathMatches...)
 	for batchStart := 0; batchStart < len(files) && len(allMatches) < collectionLimit; batchStart += workerCount {
 		batchEnd := min(batchStart+workerCount, len(files))
 		batchMatches := make([][]SearchMatch, batchEnd-batchStart)
@@ -134,7 +150,10 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 		if allMatches[i].Path != allMatches[j].Path {
 			return allMatches[i].Path < allMatches[j].Path
 		}
-		return allMatches[i].Line < allMatches[j].Line
+		if allMatches[i].Line != allMatches[j].Line {
+			return allMatches[i].Line < allMatches[j].Line
+		}
+		return allMatches[i].MatchTarget < allMatches[j].MatchTarget
 	})
 
 	truncated := len(allMatches) > maximumCollectedSearchMatches
@@ -178,9 +197,10 @@ func searchFile(workspace string, path string, query string, matchLimit int) ([]
 		line := scanner.Text()
 		if strings.Contains(line, query) {
 			matches = append(matches, SearchMatch{
-				Path: filepath.ToSlash(relativePath),
-				Line: lineNumber,
-				Text: line,
+				Path:        filepath.ToSlash(relativePath),
+				Line:        lineNumber,
+				Text:        line,
+				MatchTarget: "content",
 			})
 			if len(matches) >= matchLimit {
 				break
