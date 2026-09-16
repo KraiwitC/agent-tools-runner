@@ -10,6 +10,7 @@ import (
 
 const AgentsFileName = "AGENTS.md"
 const PlanFileName = "PLAN.md"
+const SkillsDirectoryName = ".skills"
 const bootstrapInstructions = `# Agent Tools Runner Instructions
 
 ## Identity and Protocol
@@ -149,7 +150,11 @@ func Create(workspace string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	prompt := buildBootstrapPrompt(repositoryInstructions, agentsFileFound, taskPlan, planFileFound)
+	skills, err := readSkills(workspace)
+	if err != nil {
+		return "", false, err
+	}
+	prompt := buildBootstrapPrompt(repositoryInstructions, agentsFileFound, taskPlan, planFileFound, skills)
 	return prompt, agentsFileFound, nil
 }
 
@@ -177,7 +182,33 @@ func readTaskPlan(workspace string) (string, bool, error) {
 	return string(content), true, nil
 }
 
-func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, taskPlan string, planFileFound bool) string {
+func readSkills(workspace string) (string, error) {
+	entries, err := os.ReadDir(filepath.Join(workspace, SkillsDirectoryName))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", SkillsDirectoryName, err)
+	}
+
+	var skills strings.Builder
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(workspace, SkillsDirectoryName, entry.Name()))
+		if err != nil {
+			return "", fmt.Errorf("read skill %s: %w", entry.Name(), err)
+		}
+		fmt.Fprintf(&skills, "\n### %s\n\n%s", entry.Name(), content)
+		if !strings.HasSuffix(string(content), "\n") {
+			skills.WriteString("\n")
+		}
+	}
+	return skills.String(), nil
+}
+
+func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, taskPlan string, planFileFound bool, skills string) string {
 	var prompt strings.Builder
 	prompt.WriteString(bootstrapInstructions)
 	if agentsFileFound {
@@ -195,6 +226,10 @@ func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, t
 		if !strings.HasSuffix(taskPlan, "\n") {
 			prompt.WriteString("\n")
 		}
+	}
+	if skills != "" {
+		prompt.WriteString("\n## Loaded Skills\n")
+		prompt.WriteString(skills)
 	}
 	prompt.WriteString("\n## User Instructions\n\n")
 	return prompt.String()

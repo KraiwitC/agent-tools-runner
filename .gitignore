@@ -51,3 +51,6 @@ __debug_bin
 local.yaml
 local.yml
 config.local.*
+
+# Skills
+.skills/
