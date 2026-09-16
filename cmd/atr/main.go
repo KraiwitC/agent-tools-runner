@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"agent-tools-runner/internal/app"
 	atrclipboard "agent-tools-runner/internal/clipboard"
@@ -13,7 +14,7 @@ import (
 
 const (
 	applicationName    = "Agent Tools Runner"
-	applicationVersion = "v0.8.1"
+	applicationVersion = "v0.8.2"
 )
 
 type options struct {
@@ -37,7 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	bootstrapPrompt, agentsFileFound, err := prompt.Create(workspace)
+	bootstrapPrompt, agentsFileFound, skillNames, err := prompt.Create(workspace)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create bootstrap prompt: %v\n", err)
 		os.Exit(1)
@@ -48,9 +49,14 @@ func main() {
 	fmt.Println(applicationName + " " + applicationVersion)
 	fmt.Printf("Workspace: %s\n", workspace)
 	if agentsFileFound {
-		fmt.Printf("Project instructions: %s found\n", prompt.AgentsFileName)
+		fmt.Printf("Project instructions: %s\n", prompt.AgentsFileName)
 	} else {
-		fmt.Printf("Project instructions: no %s found\n", prompt.AgentsFileName)
+		fmt.Println("Project instructions: none")
+	}
+	if len(skillNames) != 0 {
+		fmt.Printf("Skills: %s\n", strings.Join(skillNames, ", "))
+	} else {
+		fmt.Println("Skills: none")
 	}
 	fmt.Println()
 	if clipboardReady {
@@ -64,6 +70,7 @@ func main() {
 	fmt.Println()
 	fmt.Println("Paste a JSON request, then press Enter on an empty line to run it.")
 	fmt.Println("Type /help for commands.")
+	fmt.Println()
 
 	app.Run(workspace, clipboardReady, os.Stdin)
 }

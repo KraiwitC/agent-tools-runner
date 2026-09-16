@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestExecuteInspectActionReturnsFileMetadata(t *testing.T) {
@@ -30,6 +32,24 @@ func TestExecuteInspectActionReturnsFileMetadata(t *testing.T) {
 	expectedHash := sha256.Sum256([]byte(content))
 	if data.SHA256 != hex.EncodeToString(expectedHash[:]) {
 		t.Fatalf("unexpected SHA-256: %q", data.SHA256)
+	}
+}
+
+func TestExecuteInspectActionPreviewsOversizedTextFile(t *testing.T) {
+	workspace := t.TempDir()
+	content := strings.Repeat("a", 4095) + "ก" + strings.Repeat("b", int(maximumFileSize))
+	writeTestFile(t, workspace, "large.txt", content)
+	action := Action{ID: "inspect-file", Operation: "inspect", Path: "large.txt"}
+
+	data, responseError := executeInspectAction(workspace, action, 0)
+	if responseError != nil {
+		t.Fatalf("executeInspectAction returned an error: %#v", responseError)
+	}
+	if data.SizeBytes != int64(len(content)) || !data.Truncated {
+		t.Fatalf("unexpected oversized file metadata: %#v", data)
+	}
+	if len(data.Content) != 4095 || !utf8.ValidString(data.Content) || data.SHA256 != "" || data.LineCount != 0 {
+		t.Fatalf("unexpected oversized file preview: %#v", data)
 	}
 }
 

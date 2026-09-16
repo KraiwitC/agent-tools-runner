@@ -10,6 +10,7 @@ import (
 
 const AgentsFileName = "AGENTS.md"
 const PlanFileName = "PLAN.md"
+const SkillsDirectoryName = ".skills"
 const bootstrapInstructions = `# Agent Tools Runner Instructions
 
 ## Identity and Protocol
@@ -140,17 +141,21 @@ When a task is complete, suggest one minimal Conventional Commit message with an
 
 `
 
-func Create(workspace string) (string, bool, error) {
+func Create(workspace string) (string, bool, []string, error) {
 	repositoryInstructions, agentsFileFound, err := readRepositoryInstructions(workspace)
 	if err != nil {
-		return "", false, err
+		return "", false, nil, err
 	}
 	taskPlan, planFileFound, err := readTaskPlan(workspace)
 	if err != nil {
-		return "", false, err
+		return "", false, nil, err
 	}
-	prompt := buildBootstrapPrompt(repositoryInstructions, agentsFileFound, taskPlan, planFileFound)
-	return prompt, agentsFileFound, nil
+	skills, skillNames, err := readSkills(workspace)
+	if err != nil {
+		return "", false, nil, err
+	}
+	prompt := buildBootstrapPrompt(repositoryInstructions, agentsFileFound, taskPlan, planFileFound, skills)
+	return prompt, agentsFileFound, skillNames, nil
 }
 
 func readRepositoryInstructions(workspace string) (string, bool, error) {
@@ -177,7 +182,35 @@ func readTaskPlan(workspace string) (string, bool, error) {
 	return string(content), true, nil
 }
 
-func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, taskPlan string, planFileFound bool) string {
+func readSkills(workspace string) (string, []string, error) {
+	entries, err := os.ReadDir(filepath.Join(workspace, SkillsDirectoryName))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil, nil
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("read %s: %w", SkillsDirectoryName, err)
+	}
+
+	var skills strings.Builder
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(workspace, SkillsDirectoryName, entry.Name()))
+		if err != nil {
+			return "", nil, fmt.Errorf("read skill %s: %w", entry.Name(), err)
+		}
+		names = append(names, entry.Name())
+		fmt.Fprintf(&skills, "\n### %s\n\n%s", entry.Name(), content)
+		if !strings.HasSuffix(string(content), "\n") {
+			skills.WriteString("\n")
+		}
+	}
+	return skills.String(), names, nil
+}
+
+func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, taskPlan string, planFileFound bool, skills string) string {
 	var prompt strings.Builder
 	prompt.WriteString(bootstrapInstructions)
 	if agentsFileFound {
@@ -195,6 +228,10 @@ func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, t
 		if !strings.HasSuffix(taskPlan, "\n") {
 			prompt.WriteString("\n")
 		}
+	}
+	if skills != "" {
+		prompt.WriteString("\n## Loaded Skills\n")
+		prompt.WriteString(skills)
 	}
 	prompt.WriteString("\n## User Instructions\n\n")
 	return prompt.String()

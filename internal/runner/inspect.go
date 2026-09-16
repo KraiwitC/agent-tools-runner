@@ -3,9 +3,11 @@ package runner
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 )
 
 func executeInspectAction(workspace string, action Action, actionIndex int) (*ActionData, *ResponseError) {
@@ -30,6 +32,17 @@ func executeInspectAction(workspace string, action Action, actionIndex int) (*Ac
 			Type:  "directory",
 			Empty: &empty,
 		}, nil
+	}
+
+	if fileInfo.Size() > maximumFileSize {
+		content, err := readFileHead(resolvedPath, 4096)
+		for err == nil && !utf8.Valid(content) {
+			content = content[:len(content)-1]
+		}
+		if err != nil || !isSupportedText(content) {
+			return &ActionData{Path: relativePath, Type: "file"}, newActionResponseError(action, actionIndex, "UNSUPPORTED_FILE", "Could not preview the requested UTF-8 text file.", relativePath)
+		}
+		return &ActionData{Path: relativePath, Type: "file", Content: string(content), SizeBytes: fileInfo.Size(), Truncated: true}, nil
 	}
 
 	content, err := readTextFile(resolvedPath, relativePath, "Could not open the requested file.", "Could not read the requested file.")
@@ -81,11 +94,16 @@ func resolveWorkspaceInspectPath(workspace string, requestedPath string) (string
 	if !fileInfo.IsDir() && !fileInfo.Mode().IsRegular() {
 		return "", relativePath, nil, newWorkspaceError("UNSUPPORTED_FILE", "Path is not a regular file or directory.", relativePath, nil)
 	}
-	if fileInfo.Mode().IsRegular() && fileInfo.Size() > maximumFileSize {
-		return "", relativePath, nil, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 1 MiB Version 1 limit.", relativePath, nil)
-	}
-
 	return resolvedPath, relativePath, fileInfo, nil
+}
+
+func readFileHead(path string, size int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(io.LimitReader(file, size))
 }
 
 func countFileLines(content []byte) int {

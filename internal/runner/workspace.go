@@ -12,7 +12,7 @@ import (
 	"unicode/utf8"
 )
 
-const maximumFileSize int64 = 1024 * 1024
+const maximumFileSize int64 = 10 * 1024 * 1024
 
 type workspaceError struct {
 	Code    string
@@ -100,7 +100,7 @@ func resolveWorkspaceFile(workspace string, requestedPath string) (string, strin
 		return "", relativePath, nil, newWorkspaceError("UNSUPPORTED_FILE", "Path does not identify a regular file.", relativePath, nil)
 	}
 	if fileInfo.Size() > maximumFileSize {
-		return "", relativePath, nil, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 1 MiB Version 1 limit.", relativePath, nil)
+		return "", relativePath, nil, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 10 MiB Version 1 limit.", relativePath, nil)
 	}
 
 	return resolvedPath, relativePath, fileInfo, nil
@@ -121,7 +121,7 @@ func readTextFile(path string, relativePath string, openMessage string, readMess
 		return nil, newWorkspaceError("READ_FAILED", readMessage, relativePath, err)
 	}
 	if int64(len(content)) > maximumFileSize {
-		return nil, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 1 MiB Version 1 limit.", relativePath, nil)
+		return nil, newWorkspaceError("FILE_TOO_LARGE", "File exceeds the 10 MiB limit.", relativePath, nil)
 	}
 	if !isSupportedText(content) {
 		return nil, newWorkspaceError("UNSUPPORTED_FILE", "File is not supported UTF-8 text.", relativePath, nil)
