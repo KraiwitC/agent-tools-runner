@@ -536,7 +536,6 @@ func CreateErrorResponse(code string, message string) string {
 func marshalResponse(response Response) string {
 	var output bytes.Buffer
 	encoder := json.NewEncoder(&output)
-	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(response); err != nil {
 		return fmt.Sprintf("{\"version\":%q,\"status\":\"error\",\"results\":[],\"error\":{\"code\":\"INTERNAL_ERROR\",\"message\":%q}}", protocolVersion, "Could not encode response")
