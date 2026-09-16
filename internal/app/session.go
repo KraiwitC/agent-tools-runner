@@ -125,6 +125,7 @@ func runSession(workspace string, clipboardReady bool, scanner lineScanner) {
 
 		if !isJSONRequestStart(input) {
 			fmt.Println("Input ignored. ATR accepts slash commands or a JSON request beginning with \"{\" or a JSON code fence.")
+			fmt.Println()
 			continue
 		}
 
@@ -137,6 +138,7 @@ func runSession(workspace string, clipboardReady bool, scanner lineScanner) {
 		}
 		if cancelled {
 			fmt.Println("Request cancelled.")
+			fmt.Println()
 			continue
 		}
 
@@ -200,51 +202,63 @@ func handleCommand(command string, workspace string, lastResponse string, clipbo
 	case "/help":
 		printHelp()
 	case "/prompt":
-		bootstrapPrompt, _, err := prompt.Create(workspace)
+		bootstrapPrompt, _, _, err := prompt.Create(workspace)
 		if err != nil {
 			fmt.Printf("Failed to refresh LLM bootstrap prompt: %v\n", err)
 		} else if clipboardReady {
 			atrclipboard.Copy(bootstrapPrompt)
 			fmt.Println("Refreshed LLM bootstrap prompt copied to clipboard.")
 			fmt.Println("Start a new conversation and paste the prompt for refreshed project instructions to take effect.")
+			fmt.Println()
 		} else {
 			fmt.Println("Clipboard is unavailable. Type /show-prompt to display a refreshed bootstrap prompt.")
+			fmt.Println()
 		}
 	case "/show-prompt":
-		bootstrapPrompt, _, err := prompt.Create(workspace)
+		bootstrapPrompt, _, _, err := prompt.Create(workspace)
 		if err != nil {
 			fmt.Printf("Failed to refresh LLM bootstrap prompt: %v\n", err)
+			fmt.Println()
 		} else {
 			fmt.Println(bootstrapPrompt)
+			fmt.Println()
 		}
 	case "/copy":
 		if lastResponse == "" {
 			fmt.Println("No JSON response is available to copy.")
+			fmt.Println()
 		} else if clipboardReady {
 			atrclipboard.Copy(lastResponse)
 			fmt.Println("Last JSON response copied to clipboard.")
+			fmt.Println()
 		} else {
 			fmt.Println("Clipboard is unavailable. Type /show to display the last JSON response.")
+			fmt.Println()
 		}
 	case "/show":
 		if lastResponse == "" {
 			fmt.Println("No JSON response is available to show.")
+			fmt.Println()
 		} else {
 			fmt.Println(lastResponse)
+			fmt.Println()
 		}
 	case "/limit":
 		if len(fields) == 1 {
 			fmt.Printf("Transfer limit: %d characters\n", runner.MaximumTransferChars())
+			fmt.Println()
 			break
 		}
 		if len(fields) != 2 {
 			fmt.Println("Usage: /limit [characters]")
+			fmt.Println()
 			break
 		}
 
 		limit, err := strconv.Atoi(fields[1])
 		if err != nil || limit < 1000 {
 			fmt.Println("Transfer limit must be an integer greater than or equal to 1000.")
+			fmt.Println()
 			break
 		}
 
@@ -296,6 +310,7 @@ func printHelp() {
 	fmt.Println()
 	fmt.Println("Paste a protocol version 1 JSON request, then press Enter on an empty line.")
 	fmt.Println("While entering JSON, type /cancel on its own line to discard the request.")
+	fmt.Println()
 }
 
 func ResolveWorkspace(path string) (string, error) {

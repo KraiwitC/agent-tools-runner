@@ -141,21 +141,21 @@ When a task is complete, suggest one minimal Conventional Commit message with an
 
 `
 
-func Create(workspace string) (string, bool, error) {
+func Create(workspace string) (string, bool, []string, error) {
 	repositoryInstructions, agentsFileFound, err := readRepositoryInstructions(workspace)
 	if err != nil {
-		return "", false, err
+		return "", false, nil, err
 	}
 	taskPlan, planFileFound, err := readTaskPlan(workspace)
 	if err != nil {
-		return "", false, err
+		return "", false, nil, err
 	}
-	skills, err := readSkills(workspace)
+	skills, skillNames, err := readSkills(workspace)
 	if err != nil {
-		return "", false, err
+		return "", false, nil, err
 	}
 	prompt := buildBootstrapPrompt(repositoryInstructions, agentsFileFound, taskPlan, planFileFound, skills)
-	return prompt, agentsFileFound, nil
+	return prompt, agentsFileFound, skillNames, nil
 }
 
 func readRepositoryInstructions(workspace string) (string, bool, error) {
@@ -182,30 +182,32 @@ func readTaskPlan(workspace string) (string, bool, error) {
 	return string(content), true, nil
 }
 
-func readSkills(workspace string) (string, error) {
+func readSkills(workspace string) (string, []string, error) {
 	entries, err := os.ReadDir(filepath.Join(workspace, SkillsDirectoryName))
 	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
+		return "", nil, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("read %s: %w", SkillsDirectoryName, err)
+		return "", nil, fmt.Errorf("read %s: %w", SkillsDirectoryName, err)
 	}
 
 	var skills strings.Builder
+	var names []string
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
 			continue
 		}
 		content, err := os.ReadFile(filepath.Join(workspace, SkillsDirectoryName, entry.Name()))
 		if err != nil {
-			return "", fmt.Errorf("read skill %s: %w", entry.Name(), err)
+			return "", nil, fmt.Errorf("read skill %s: %w", entry.Name(), err)
 		}
+		names = append(names, entry.Name())
 		fmt.Fprintf(&skills, "\n### %s\n\n%s", entry.Name(), content)
 		if !strings.HasSuffix(string(content), "\n") {
 			skills.WriteString("\n")
 		}
 	}
-	return skills.String(), nil
+	return skills.String(), names, nil
 }
 
 func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, taskPlan string, planFileFound bool, skills string) string {
