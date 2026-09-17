@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	atrclipboard "agent-tools-runner/internal/clipboard"
 	"agent-tools-runner/internal/prompt"
@@ -105,7 +106,26 @@ func (t *terminalLineReader) Err() error {
 
 func runSession(workspace string, clipboardReady bool, scanner lineScanner) {
 	lastResponse := ""
+	autoMode := false
+	lastClipboardRequest := ""
+
 	for {
+		if autoMode {
+			trimmedText := strings.TrimSpace(atrclipboard.Read())
+			if looksLikeRequest(trimmedText) && trimmedText != lastClipboardRequest {
+				request, err := runner.ParseAndValidateRequest(trimmedText)
+				if err == nil {
+					lastClipboardRequest = trimmedText
+					fmt.Println("> Running ATR request.")
+					responseText := runner.ExecuteRequest(workspace, request)
+					lastResponse = responseText
+					presentResponse(responseText, clipboardReady)
+				}
+			}
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
 		fmt.Print("> ")
 		if !scanner.Scan() {
 			fmt.Println()
@@ -117,6 +137,19 @@ func runSession(workspace string, clipboardReady bool, scanner lineScanner) {
 		}
 
 		if strings.HasPrefix(input, "/") {
+			if input == "/auto" {
+				if !clipboardReady {
+					fmt.Println("Clipboard is unavailable.")
+					fmt.Println()
+					continue
+				}
+				autoMode = true
+				fmt.Println("Started monitoring clipboard.")
+				fmt.Println("Press Ctrl+C to exit.")
+				fmt.Println()
+				continue
+			}
+
 			if handleCommand(input, workspace, lastResponse, clipboardReady) {
 				return
 			}
@@ -189,6 +222,18 @@ func isJSONRequestStart(input string) bool {
 
 	lowerInput := strings.ToLower(trimmedInput)
 	return lowerInput == "```" || lowerInput == "```json" || lowerInput == "~~~" || lowerInput == "~~~json"
+}
+
+func looksLikeRequest(text string) bool {
+	if text == "" {
+		return false
+	}
+
+	if strings.Contains(text, "\"status\"") && strings.Contains(text, "\"results\"") {
+		return false
+	}
+
+	return strings.Contains(text, "\"version\"") && strings.Contains(text, "\"actions\"")
 }
 
 func handleCommand(command string, workspace string, lastResponse string, clipboardReady bool) bool {
@@ -305,6 +350,7 @@ func printHelp() {
 	fmt.Println("  /show         Show the last complete JSON response")
 	fmt.Println("  /limit [n]    Show or set the transfer limit")
 	fmt.Println("  /workspace    Show the current workspace")
+	fmt.Println("  /auto         Start clipboard monitoring mode")
 	fmt.Println("  /clear        Clear the terminal without deleting the last response")
 	fmt.Println("  /exit         Exit Agent Tools Runner")
 	fmt.Println()
