@@ -3,6 +3,7 @@ package runner
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -33,29 +34,6 @@ func TestExecuteMoveActionMovesFile(t *testing.T) {
 	}
 	assertPathDoesNotExist(t, sourcePath)
 	assertFileContent(t, filepath.Join(workspace, "destination.txt"), content)
-}
-
-func TestExecuteMoveActionRenamesFile(t *testing.T) {
-	workspace := t.TempDir()
-	content := "rename me"
-	sourcePath := writeTestFile(t, workspace, "before.txt", content)
-	action := Action{
-		ID:             "rename-file",
-		Operation:      "move",
-		Source:         "before.txt",
-		Destination:    "after.txt",
-		ExpectedSHA256: calculateSHA256([]byte(content)),
-	}
-
-	_, destinationPath, _, responseError := executeMoveAction(workspace, action, 0)
-	if responseError != nil {
-		t.Fatalf("executeMoveAction returned an error: %#v", responseError)
-	}
-	if destinationPath != "after.txt" {
-		t.Fatalf("destination path = %q, want %q", destinationPath, "after.txt")
-	}
-	assertPathDoesNotExist(t, sourcePath)
-	assertFileContent(t, filepath.Join(workspace, "after.txt"), content)
 }
 
 func TestExecuteMoveActionRejectsChangedSource(t *testing.T) {
@@ -112,24 +90,96 @@ func TestExecuteMoveActionRejectsMissingDestinationParent(t *testing.T) {
 	assertPathDoesNotExist(t, filepath.Join(workspace, "missing", "destination.txt"))
 }
 
-func TestExecuteMoveActionRejectsSymbolicLinkSource(t *testing.T) {
-	workspace := t.TempDir()
-	content := "source"
-	writeTestFile(t, workspace, "source.txt", content)
-	linkPath := filepath.Join(workspace, "linked.txt")
-	if err := os.Symlink(filepath.Join(workspace, "source.txt"), linkPath); err != nil {
-		t.Skipf("symbolic links are unavailable in this environment: %v", err)
-	}
-	action := Action{
-		ID:             "move-file",
-		Operation:      "move",
-		Source:         "linked.txt",
-		Destination:    "destination.txt",
-		ExpectedSHA256: calculateSHA256([]byte(content)),
+func TestExecuteMoveActionRejectsUnsupportedPathsAndSources(t *testing.T) {
+	tests := []struct {
+		name         string
+		setup        func(t *testing.T, workspace string) (Action, string, string)
+		expectedCode string
+	}{
+		{
+			name: "symbolic link source",
+			setup: func(t *testing.T, workspace string) (Action, string, string) {
+				content := "source"
+				sourcePath := writeTestFile(t, workspace, "source.txt", content)
+				if err := os.Symlink(sourcePath, filepath.Join(workspace, "linked.txt")); err != nil {
+					t.Skipf("symbolic links are unavailable in this environment: %v", err)
+				}
+				action := Action{ID: "move-file", Operation: "move", Source: "linked.txt", Destination: "destination.txt", ExpectedSHA256: calculateSHA256([]byte(content))}
+				return action, sourcePath, content
+			},
+			expectedCode: "SYMLINK_NOT_SUPPORTED",
+		},
+		{
+			name: "binary source",
+			setup: func(t *testing.T, workspace string) (Action, string, string) {
+				content := "before\x00after"
+				sourcePath := writeTestFile(t, workspace, "source.dat", content)
+				action := Action{ID: "move-file", Operation: "move", Source: "source.dat", Destination: "destination.txt", ExpectedSHA256: calculateSHA256([]byte(content))}
+				return action, sourcePath, content
+			},
+			expectedCode: "UNSUPPORTED_FILE",
+		},
+		{
+			name: "oversized source",
+			setup: func(t *testing.T, workspace string) (Action, string, string) {
+				content := strings.Repeat("a", int(maximumFileSize)+1)
+				sourcePath := writeTestFile(t, workspace, "source.txt", content)
+				action := Action{ID: "move-file", Operation: "move", Source: "source.txt", Destination: "destination.txt", ExpectedSHA256: calculateSHA256([]byte(content))}
+				return action, sourcePath, content
+			},
+			expectedCode: "FILE_TOO_LARGE",
+		},
+		{
+			name: "destination parent is a file",
+			setup: func(t *testing.T, workspace string) (Action, string, string) {
+				content := "source"
+				sourcePath := writeTestFile(t, workspace, "source.txt", content)
+				writeTestFile(t, workspace, "parent", "not a directory")
+				action := Action{ID: "move-file", Operation: "move", Source: "source.txt", Destination: "parent/destination.txt", ExpectedSHA256: calculateSHA256([]byte(content))}
+				return action, sourcePath, content
+			},
+			expectedCode: "UNSUPPORTED_FILE",
+		},
+		{
+			name: "symbolic link destination parent",
+			setup: func(t *testing.T, workspace string) (Action, string, string) {
+				content := "source"
+				sourcePath := writeTestFile(t, workspace, "source.txt", content)
+				realDirectory := filepath.Join(workspace, "real")
+				if err := os.Mkdir(realDirectory, 0o700); err != nil {
+					t.Fatalf("create real directory: %v", err)
+				}
+				if err := os.Symlink(realDirectory, filepath.Join(workspace, "linked")); err != nil {
+					t.Skipf("symbolic links are unavailable in this environment: %v", err)
+				}
+				action := Action{ID: "move-file", Operation: "move", Source: "source.txt", Destination: "linked/destination.txt", ExpectedSHA256: calculateSHA256([]byte(content))}
+				return action, sourcePath, content
+			},
+			expectedCode: "SYMLINK_NOT_SUPPORTED",
+		},
+		{
+			name: "source and destination are the same path",
+			setup: func(t *testing.T, workspace string) (Action, string, string) {
+				content := "source"
+				sourcePath := writeTestFile(t, workspace, "source.txt", content)
+				action := Action{ID: "move-file", Operation: "move", Source: "source.txt", Destination: "source.txt", ExpectedSHA256: calculateSHA256([]byte(content))}
+				return action, sourcePath, content
+			},
+			expectedCode: "FILE_ALREADY_EXISTS",
+		},
 	}
 
-	_, _, _, responseError := executeMoveAction(workspace, action, 0)
-	assertResponseErrorCode(t, responseError, "SYMLINK_NOT_SUPPORTED")
-	assertFileContent(t, filepath.Join(workspace, "source.txt"), content)
-	assertPathDoesNotExist(t, filepath.Join(workspace, "destination.txt"))
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			action, sourcePath, sourceContent := test.setup(t, workspace)
+
+			_, _, _, responseError := executeMoveAction(workspace, action, 0)
+			assertResponseErrorCode(t, responseError, test.expectedCode)
+			assertFileContent(t, sourcePath, sourceContent)
+			if action.Destination != action.Source {
+				assertPathDoesNotExist(t, filepath.Join(workspace, action.Destination))
+			}
+		})
+	}
 }

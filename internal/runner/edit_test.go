@@ -201,6 +201,116 @@ func TestExecuteEditActionRejectsChangedFile(t *testing.T) {
 	assertFileContent(t, path, "current")
 }
 
+func TestExecuteEditActionHandlesReplacementBoundaries(t *testing.T) {
+	tests := []struct {
+		name         string
+		original     string
+		replacements []Replacement
+		expected     string
+	}{
+		{
+			name:         "unchanged replacement",
+			original:     "keep this value",
+			replacements: []Replacement{{OldText: "this", NewText: "this"}},
+			expected:     "keep this value",
+		},
+		{
+			name:     "reverse source order",
+			original: "alpha beta gamma",
+			replacements: []Replacement{
+				{OldText: "gamma", NewText: "G"},
+				{OldText: "alpha", NewText: "A"},
+			},
+			expected: "A beta G",
+		},
+		{
+			name:     "adjacent replacements",
+			original: "abcdef",
+			replacements: []Replacement{
+				{OldText: "abc", NewText: "one"},
+				{OldText: "def", NewText: "two"},
+			},
+			expected: "onetwo",
+		},
+		{
+			name:     "UTF-8 boundaries",
+			original: "ก่อนสวัสดีหลัง",
+			replacements: []Replacement{
+				{OldText: "ก่อน", NewText: "หน้า"},
+				{OldText: "หลัง", NewText: "ท้าย"},
+			},
+			expected: "หน้าสวัสดีท้าย",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			path := writeTestFile(t, workspace, "edit.txt", test.original)
+			action := Action{
+				ID:             "edit-file",
+				Operation:      "edit",
+				Path:           "edit.txt",
+				ExpectedSHA256: calculateSHA256([]byte(test.original)),
+				Replacements:   test.replacements,
+			}
+
+			applied, updatedSHA256, responseError := executeEditAction(workspace, action, 0)
+			if responseError != nil {
+				t.Fatalf("executeEditAction returned an error: %#v", responseError)
+			}
+			if applied != len(test.replacements) {
+				t.Fatalf("replacements applied = %d, want %d", applied, len(test.replacements))
+			}
+			if updatedSHA256 != calculateSHA256([]byte(test.expected)) {
+				t.Fatalf("updated SHA-256 = %q, want hash of expected content", updatedSHA256)
+			}
+			assertFileContent(t, path, test.expected)
+			assertNoTemporaryEditFiles(t, workspace)
+		})
+	}
+}
+
+func TestExecuteEditActionRejectsUnsupportedTarget(t *testing.T) {
+	tests := []struct {
+		name         string
+		content      string
+		expectedCode string
+	}{
+		{
+			name:         "binary target",
+			content:      "before\x00after",
+			expectedCode: "UNSUPPORTED_FILE",
+		},
+		{
+			name:         "oversized target",
+			content:      strings.Repeat("a", int(maximumFileSize)+1),
+			expectedCode: "FILE_TOO_LARGE",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			path := writeTestFile(t, workspace, "edit.txt", test.content)
+			action := Action{
+				ID:             "edit-file",
+				Operation:      "edit",
+				Path:           "edit.txt",
+				ExpectedSHA256: calculateSHA256([]byte(test.content)),
+				Replacements: []Replacement{
+					{OldText: "before", NewText: "after"},
+				},
+			}
+
+			_, _, responseError := executeEditAction(workspace, action, 0)
+			assertResponseErrorCode(t, responseError, test.expectedCode)
+			assertFileContent(t, path, test.content)
+			assertNoTemporaryEditFiles(t, workspace)
+		})
+	}
+}
+
 func assertFileContent(t *testing.T, path string, expected string) {
 	t.Helper()
 	content, err := os.ReadFile(path)
