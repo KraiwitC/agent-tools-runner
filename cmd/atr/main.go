@@ -19,6 +19,7 @@ const (
 
 type options struct {
 	workspace string
+	autoMode  bool
 	version   bool
 }
 
@@ -72,7 +73,7 @@ func main() {
 	fmt.Println("Type /help for commands.")
 	fmt.Println()
 
-	app.Run(workspace, clipboardReady, os.Stdin)
+	app.Run(workspace, clipboardReady, os.Stdin, options.autoMode)
 }
 
 func parseOptions(args []string, output io.Writer) (options, error) {
@@ -80,6 +81,7 @@ func parseOptions(args []string, output io.Writer) (options, error) {
 	flagSet.SetOutput(output)
 
 	workspace := flagSet.String("workspace", ".", "project workspace directory")
+	autoMode := flagSet.Bool("auto", false, "start in clipboard monitoring mode")
 	version := flagSet.Bool("version", false, "show application version")
 	if err := flagSet.Parse(args); err != nil {
 		return options{}, err
@@ -87,6 +89,7 @@ func parseOptions(args []string, output io.Writer) (options, error) {
 
 	return options{
 		workspace: *workspace,
+		autoMode:  *autoMode,
 		version:   *version,
 	}, nil
 }

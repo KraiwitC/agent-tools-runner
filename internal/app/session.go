@@ -25,7 +25,7 @@ type lineScanner interface {
 	Err() error
 }
 
-func Run(workspace string, clipboardReady bool, input io.Reader) {
+func Run(workspace string, clipboardReady bool, input io.Reader, startAutoMode bool) {
 	cleanup, interactive, _ := enableNonCanonicalInput()
 	defer cleanup()
 
@@ -37,7 +37,48 @@ func Run(workspace string, clipboardReady bool, input io.Reader) {
 		bufScanner.Buffer(make([]byte, scannerInitialBufferSize), scannerMaximumBufferSize)
 		scanner = bufScanner
 	}
-	runSession(workspace, clipboardReady, scanner)
+	runSession(workspace, clipboardReady, newAsyncLineScanner(scanner), startAutoMode)
+}
+
+type scanResult struct {
+	text string
+	err  error
+}
+
+type asyncLineScanner struct {
+	results <-chan scanResult
+	text    string
+	err     error
+}
+
+func newAsyncLineScanner(scanner lineScanner) *asyncLineScanner {
+	results := make(chan scanResult)
+	go func() {
+		defer close(results)
+		for scanner.Scan() {
+			results <- scanResult{text: scanner.Text()}
+		}
+		results <- scanResult{err: scanner.Err()}
+	}()
+	return &asyncLineScanner{results: results}
+}
+
+func (a *asyncLineScanner) Scan() bool {
+	result, ok := <-a.results
+	if !ok {
+		return false
+	}
+	a.text = result.text
+	a.err = result.err
+	return result.err == nil
+}
+
+func (a *asyncLineScanner) Text() string {
+	return a.text
+}
+
+func (a *asyncLineScanner) Err() error {
+	return a.err
 }
 
 type terminalLineReader struct {
@@ -104,25 +145,64 @@ func (t *terminalLineReader) Err() error {
 	return t.err
 }
 
-func runSession(workspace string, clipboardReady bool, scanner lineScanner) {
+func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner, startAutoMode bool) {
 	lastResponse := ""
-	autoMode := false
+	autoMode := startAutoMode && clipboardReady
 	lastClipboardRequest := ""
+	autoPromptShown := false
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	if startAutoMode && !clipboardReady {
+		fmt.Println("Auto mode was not started because the clipboard is unavailable.")
+		fmt.Println()
+	}
 
 	for {
 		if autoMode {
-			trimmedText := strings.TrimSpace(atrclipboard.Read())
-			if looksLikeRequest(trimmedText) && trimmedText != lastClipboardRequest {
-				request, err := runner.ParseAndValidateRequest(trimmedText)
-				if err == nil {
-					lastClipboardRequest = trimmedText
-					fmt.Println("> Running ATR request.")
-					responseText := runner.ExecuteRequest(workspace, request)
-					lastResponse = responseText
-					presentResponse(responseText, clipboardReady)
+			if !autoPromptShown {
+				fmt.Print("Command > ")
+				autoPromptShown = true
+			}
+			select {
+			case result, ok := <-scanner.results:
+				if !ok || result.err != nil {
+					fmt.Println()
+					return
+				}
+				autoPromptShown = false
+				input := strings.TrimSpace(result.text)
+				if input == "" {
+					continue
+				}
+				if input == "/auto" {
+					autoMode = false
+					fmt.Println("Stopped monitoring clipboard.")
+					fmt.Println()
+					continue
+				}
+				if !strings.HasPrefix(input, "/") {
+					fmt.Println("Input ignored. Only slash commands are accepted while auto mode is active.")
+					fmt.Println()
+					continue
+				}
+				if handleCommand(input, workspace, lastResponse, clipboardReady) {
+					return
+				}
+			case <-ticker.C:
+				trimmedText := strings.TrimSpace(atrclipboard.Read())
+				if looksLikeRequest(trimmedText) && trimmedText != lastClipboardRequest {
+					request, err := runner.ParseAndValidateRequest(trimmedText)
+					if err == nil {
+						lastClipboardRequest = trimmedText
+						fmt.Println("\n> Running ATR request.")
+						responseText := runner.ExecuteRequest(workspace, request)
+						lastResponse = responseText
+						presentResponse(responseText, clipboardReady)
+						autoPromptShown = false
+					}
 				}
 			}
-			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 
@@ -145,7 +225,7 @@ func runSession(workspace string, clipboardReady bool, scanner lineScanner) {
 				}
 				autoMode = true
 				fmt.Println("Started monitoring clipboard.")
-				fmt.Println("Press Ctrl+C to exit.")
+				fmt.Println("Type /auto again to stop.")
 				fmt.Println()
 				continue
 			}
@@ -309,17 +389,21 @@ func handleCommand(command string, workspace string, lastResponse string, clipbo
 
 		runner.SetMaximumTransferChars(limit)
 		fmt.Printf("Transfer limit: %d characters\n", limit)
+		fmt.Println()
 	case "/workspace":
 		fmt.Println(workspace)
+		fmt.Println()
 	case "/clear":
 		fmt.Print("\033[H\033[2J")
 	case "/cancel":
 		fmt.Println("No active JSON request to cancel.")
+		fmt.Println()
 	case "/exit":
 		shouldExit = true
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
 		fmt.Println("Type /help for available commands.")
+		fmt.Println()
 	}
 	return shouldExit
 }
@@ -350,7 +434,7 @@ func printHelp() {
 	fmt.Println("  /show         Show the last complete JSON response")
 	fmt.Println("  /limit [n]    Show or set the transfer limit")
 	fmt.Println("  /workspace    Show the current workspace")
-	fmt.Println("  /auto         Start clipboard monitoring mode")
+	fmt.Println("  /auto         Toggle clipboard monitoring mode")
 	fmt.Println("  /clear        Clear the terminal without deleting the last response")
 	fmt.Println("  /exit         Exit Agent Tools Runner")
 	fmt.Println()

@@ -37,6 +37,14 @@ Or select another workspace:
 go run ./cmd/atr --workspace path/to/project
 ```
 
+Start with clipboard monitoring enabled:
+
+```sh
+go run ./cmd/atr --auto
+```
+
+While clipboard monitoring is active, ATR displays `Command > ` and continues to accept slash commands. Use `/auto` to toggle clipboard monitoring on or off.
+
 Show the application version:
 
 ```sh
