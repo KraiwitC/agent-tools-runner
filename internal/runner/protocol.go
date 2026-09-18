@@ -381,6 +381,11 @@ func isValidSHA256(value string) bool {
 	return err == nil
 }
 
+type batchEditState struct {
+	OriginalSHA256 string
+	CurrentSHA256  string
+}
+
 func ExecuteRequest(workspace string, request Request) string {
 	response := Response{
 		Version: protocolVersion,
@@ -388,15 +393,33 @@ func ExecuteRequest(workspace string, request Request) string {
 		Results: make([]ActionResult, 0, len(request.Actions)),
 	}
 	maxTransferChars := MaximumTransferChars()
+	batchEdits := make(map[string]batchEditState)
 
 	for actionIndex, action := range request.Actions {
 		if isModifyingOperation(action.Operation) && !modifyingActionResultFits(response, action, actionIndex, maxTransferChars) {
 			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
 		}
 
+		editPath := ""
+		originalExpectedSHA256 := action.ExpectedSHA256
+		if action.Operation == "edit" {
+			editPath = filepath.ToSlash(filepath.Clean(action.Path))
+			if state, exists := batchEdits[editPath]; exists && action.ExpectedSHA256 == state.OriginalSHA256 {
+				action.ExpectedSHA256 = state.CurrentSHA256
+			}
+		}
+
 		result, responseError := executeAction(workspace, action, actionIndex)
 		if responseError != nil {
 			return finishActionError(response, result, responseError, action, actionIndex, maxTransferChars)
+		}
+		if action.Operation == "edit" && result.Data != nil {
+			state, exists := batchEdits[editPath]
+			if !exists {
+				state.OriginalSHA256 = originalExpectedSHA256
+			}
+			state.CurrentSHA256 = result.Data.SHA256
+			batchEdits[editPath] = state
 		}
 
 		result, truncated := fitSuccessfulResult(response, result, action, actionIndex, maxTransferChars)

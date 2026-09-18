@@ -357,6 +357,90 @@ func TestExecuteRequestDropsOversizedErrorResult(t *testing.T) {
 	}
 }
 
+func TestExecuteRequestAllowsMultipleEditsToSameFileWithOriginalHash(t *testing.T) {
+	workspace := t.TempDir()
+	original := "alpha beta gamma"
+	path := writeTestFile(t, workspace, "edit.txt", original)
+	originalSHA256 := calculateSHA256([]byte(original))
+
+	request := Request{
+		Version: protocolVersion,
+		Actions: []Action{
+			{
+				ID:             "edit-alpha",
+				Operation:      "edit",
+				Path:           "edit.txt",
+				ExpectedSHA256: originalSHA256,
+				Replacements: []Replacement{
+					{OldText: "alpha", NewText: "A"},
+				},
+			},
+			{
+				ID:             "edit-gamma",
+				Operation:      "edit",
+				Path:           "edit.txt",
+				ExpectedSHA256: originalSHA256,
+				Replacements: []Replacement{
+					{OldText: "gamma", NewText: "G"},
+				},
+			},
+		},
+	}
+
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "success" || len(response.Results) != 2 {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	firstExpectedSHA256 := calculateSHA256([]byte("A beta gamma"))
+	if response.Results[0].Data == nil || response.Results[0].Data.SHA256 != firstExpectedSHA256 {
+		t.Fatalf("unexpected first edit result: %#v", response.Results[0])
+	}
+	finalExpectedSHA256 := calculateSHA256([]byte("A beta G"))
+	if response.Results[1].Data == nil || response.Results[1].Data.SHA256 != finalExpectedSHA256 {
+		t.Fatalf("unexpected second edit result: %#v", response.Results[1])
+	}
+	assertFileContent(t, path, "A beta G")
+}
+
+func TestExecuteRequestRejectsLaterSameFileEditWithDifferentOriginalHash(t *testing.T) {
+	workspace := t.TempDir()
+	original := "alpha beta gamma"
+	path := writeTestFile(t, workspace, "edit.txt", original)
+
+	request := Request{
+		Version: protocolVersion,
+		Actions: []Action{
+			{
+				ID:             "edit-alpha",
+				Operation:      "edit",
+				Path:           "edit.txt",
+				ExpectedSHA256: calculateSHA256([]byte(original)),
+				Replacements: []Replacement{
+					{OldText: "alpha", NewText: "A"},
+				},
+			},
+			{
+				ID:             "edit-gamma",
+				Operation:      "edit",
+				Path:           "edit.txt",
+				ExpectedSHA256: calculateSHA256([]byte("different original")),
+				Replacements: []Replacement{
+					{OldText: "gamma", NewText: "G"},
+				},
+			},
+		},
+	}
+
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "error" || response.Error == nil || response.Error.Code != "FILE_CHANGED" {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	if len(response.Results) != 2 || response.Results[0].Status != "success" || response.Results[1].Status != "error" {
+		t.Fatalf("unexpected action results: %#v", response.Results)
+	}
+	assertFileContent(t, path, "A beta gamma")
+}
+
 func TestExecuteRequestStopsAfterFirstFailure(t *testing.T) {
 	workspace := t.TempDir()
 	writeTestFile(t, workspace, "first.txt", "first")
