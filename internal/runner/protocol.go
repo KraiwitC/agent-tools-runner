@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -382,6 +383,7 @@ func isValidSHA256(value string) bool {
 }
 
 type batchEditState struct {
+	ResolvedPath   string
 	OriginalSHA256 string
 	CurrentSHA256  string
 }
@@ -393,19 +395,30 @@ func ExecuteRequest(workspace string, request Request) string {
 		Results: make([]ActionResult, 0, len(request.Actions)),
 	}
 	maxTransferChars := MaximumTransferChars()
-	batchEdits := make(map[string]batchEditState)
+	batchEdits := make([]batchEditState, 0)
 
 	for actionIndex, action := range request.Actions {
 		if isModifyingOperation(action.Operation) && !modifyingActionResultFits(response, action, actionIndex, maxTransferChars) {
 			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
 		}
 
-		editPath := ""
 		originalExpectedSHA256 := action.ExpectedSHA256
+		editStateIndex := -1
+		editResolvedPath := ""
 		if action.Operation == "edit" {
-			editPath = filepath.ToSlash(filepath.Clean(action.Path))
-			if state, exists := batchEdits[editPath]; exists && action.ExpectedSHA256 == state.OriginalSHA256 {
-				action.ExpectedSHA256 = state.CurrentSHA256
+			var editFileInfo os.FileInfo
+			editResolvedPath, _, editFileInfo, _ = resolveWorkspaceFile(workspace, action.Path)
+			if editFileInfo != nil {
+				for stateIndex, state := range batchEdits {
+					stateFileInfo, err := os.Stat(state.ResolvedPath)
+					if err == nil && os.SameFile(editFileInfo, stateFileInfo) {
+						editStateIndex = stateIndex
+						if action.ExpectedSHA256 == state.OriginalSHA256 {
+							action.ExpectedSHA256 = state.CurrentSHA256
+						}
+						break
+					}
+				}
 			}
 		}
 
@@ -414,12 +427,15 @@ func ExecuteRequest(workspace string, request Request) string {
 			return finishActionError(response, result, responseError, action, actionIndex, maxTransferChars)
 		}
 		if action.Operation == "edit" && result.Data != nil {
-			state, exists := batchEdits[editPath]
-			if !exists {
-				state.OriginalSHA256 = originalExpectedSHA256
+			if editStateIndex >= 0 {
+				batchEdits[editStateIndex].CurrentSHA256 = result.Data.SHA256
+			} else {
+				batchEdits = append(batchEdits, batchEditState{
+					ResolvedPath:   editResolvedPath,
+					OriginalSHA256: originalExpectedSHA256,
+					CurrentSHA256:  result.Data.SHA256,
+				})
 			}
-			state.CurrentSHA256 = result.Data.SHA256
-			batchEdits[editPath] = state
 		}
 
 		result, truncated := fitSuccessfulResult(response, result, action, actionIndex, maxTransferChars)
