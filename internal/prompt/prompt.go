@@ -233,6 +233,6 @@ func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, t
 		prompt.WriteString("\n## Loaded Skills\n")
 		prompt.WriteString(skills)
 	}
-	prompt.WriteString("\n## User Instructions\n\n")
+	prompt.WriteString("\n# User Instructions\n\n")
 	return prompt.String()
 }

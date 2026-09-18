@@ -62,13 +62,38 @@ func TestExecuteMkdirActionRejectsExistingFile(t *testing.T) {
 	assertResponseErrorCode(t, responseError, "FILE_ALREADY_EXISTS")
 }
 
-func TestExecuteMkdirActionRejectsMissingParent(t *testing.T) {
-	workspace := t.TempDir()
-	action := Action{ID: "create-directory", Operation: "mkdir", Path: filepath.Join("missing", "child")}
+func TestExecuteMkdirActionRejectsInvalidParent(t *testing.T) {
+	tests := []struct {
+		name         string
+		setup        func(t *testing.T, workspace string)
+		expectedCode string
+	}{
+		{
+			name:         "missing parent directory",
+			expectedCode: "PARENT_DIRECTORY_NOT_FOUND",
+		},
+		{
+			name: "parent is a regular file",
+			setup: func(t *testing.T, workspace string) {
+				writeTestFile(t, workspace, "parent", "not a directory")
+			},
+			expectedCode: "UNSUPPORTED_FILE",
+		},
+	}
 
-	_, responseError := executeMkdirAction(workspace, action, 0)
-	assertResponseErrorCode(t, responseError, "PARENT_DIRECTORY_NOT_FOUND")
-	assertPathDoesNotExist(t, filepath.Join(workspace, "missing"))
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			if test.setup != nil {
+				test.setup(t, workspace)
+			}
+			action := Action{ID: "create-directory", Operation: "mkdir", Path: filepath.Join("parent", "child")}
+
+			_, responseError := executeMkdirAction(workspace, action, 0)
+			assertResponseErrorCode(t, responseError, test.expectedCode)
+			assertPathDoesNotExist(t, filepath.Join(workspace, "parent", "child"))
+		})
+	}
 }
 
 func TestExecuteMkdirActionRejectsWorkspaceRoot(t *testing.T) {

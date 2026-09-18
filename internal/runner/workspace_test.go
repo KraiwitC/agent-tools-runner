@@ -112,6 +112,17 @@ func TestReadWorkspaceFileRejectsSymlink(t *testing.T) {
 	assertWorkspaceErrorCode(t, err, "SYMLINK_NOT_SUPPORTED")
 }
 
+func TestReadWorkspaceFileRejectsSymlinkParent(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "real/file.txt", "content")
+	if err := os.Symlink(filepath.Join(workspace, "real"), filepath.Join(workspace, "linked")); err != nil {
+		t.Skipf("symbolic links are unavailable in this environment: %v", err)
+	}
+
+	_, err := readWorkspaceFile(workspace, filepath.Join("linked", "file.txt"))
+	assertWorkspaceErrorCode(t, err, "SYMLINK_NOT_SUPPORTED")
+}
+
 func writeTestFile(t *testing.T, workspace string, relativePath string, content string) string {
 	t.Helper()
 	path := filepath.Join(workspace, relativePath)

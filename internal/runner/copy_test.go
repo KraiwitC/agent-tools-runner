@@ -3,6 +3,7 @@ package runner
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -89,24 +90,87 @@ func TestExecuteCopyActionRejectsMissingDestinationParent(t *testing.T) {
 	assertPathDoesNotExist(t, filepath.Join(workspace, "missing", "destination.txt"))
 }
 
-func TestExecuteCopyActionRejectsSymbolicLinkSource(t *testing.T) {
-	workspace := t.TempDir()
-	content := "source"
-	writeTestFile(t, workspace, "source.txt", content)
-	linkPath := filepath.Join(workspace, "linked.txt")
-	if err := os.Symlink(filepath.Join(workspace, "source.txt"), linkPath); err != nil {
-		t.Skipf("symbolic links are unavailable in this environment: %v", err)
-	}
-	action := Action{
-		ID:             "copy-file",
-		Operation:      "copy",
-		Source:         "linked.txt",
-		Destination:    "destination.txt",
-		ExpectedSHA256: calculateSHA256([]byte(content)),
+func TestExecuteCopyActionRejectsUnsupportedPathsAndSources(t *testing.T) {
+	tests := []struct {
+		name         string
+		setup        func(t *testing.T, workspace string) Action
+		expectedCode string
+	}{
+		{
+			name: "symbolic link source",
+			setup: func(t *testing.T, workspace string) Action {
+				content := "source"
+				writeTestFile(t, workspace, "source.txt", content)
+				if err := os.Symlink(filepath.Join(workspace, "source.txt"), filepath.Join(workspace, "linked.txt")); err != nil {
+					t.Skipf("symbolic links are unavailable in this environment: %v", err)
+				}
+				return Action{ID: "copy-file", Operation: "copy", Source: "linked.txt", Destination: "destination.txt", ExpectedSHA256: calculateSHA256([]byte(content))}
+			},
+			expectedCode: "SYMLINK_NOT_SUPPORTED",
+		},
+		{
+			name: "binary source",
+			setup: func(t *testing.T, workspace string) Action {
+				content := "before\x00after"
+				writeTestFile(t, workspace, "source.dat", content)
+				return Action{ID: "copy-file", Operation: "copy", Source: "source.dat", Destination: "destination.txt", ExpectedSHA256: calculateSHA256([]byte(content))}
+			},
+			expectedCode: "UNSUPPORTED_FILE",
+		},
+		{
+			name: "oversized source",
+			setup: func(t *testing.T, workspace string) Action {
+				content := strings.Repeat("a", int(maximumFileSize)+1)
+				writeTestFile(t, workspace, "source.txt", content)
+				return Action{ID: "copy-file", Operation: "copy", Source: "source.txt", Destination: "destination.txt", ExpectedSHA256: calculateSHA256([]byte(content))}
+			},
+			expectedCode: "FILE_TOO_LARGE",
+		},
+		{
+			name: "destination parent is a file",
+			setup: func(t *testing.T, workspace string) Action {
+				content := "source"
+				writeTestFile(t, workspace, "source.txt", content)
+				writeTestFile(t, workspace, "parent", "not a directory")
+				return Action{ID: "copy-file", Operation: "copy", Source: "source.txt", Destination: "parent/destination.txt", ExpectedSHA256: calculateSHA256([]byte(content))}
+			},
+			expectedCode: "UNSUPPORTED_FILE",
+		},
+		{
+			name: "symbolic link destination parent",
+			setup: func(t *testing.T, workspace string) Action {
+				content := "source"
+				writeTestFile(t, workspace, "source.txt", content)
+				realDirectory := filepath.Join(workspace, "real")
+				if err := os.Mkdir(realDirectory, 0o700); err != nil {
+					t.Fatalf("create real directory: %v", err)
+				}
+				if err := os.Symlink(realDirectory, filepath.Join(workspace, "linked")); err != nil {
+					t.Skipf("symbolic links are unavailable in this environment: %v", err)
+				}
+				return Action{ID: "copy-file", Operation: "copy", Source: "source.txt", Destination: "linked/destination.txt", ExpectedSHA256: calculateSHA256([]byte(content))}
+			},
+			expectedCode: "SYMLINK_NOT_SUPPORTED",
+		},
+		{
+			name: "source and destination are the same path",
+			setup: func(t *testing.T, workspace string) Action {
+				content := "source"
+				writeTestFile(t, workspace, "source.txt", content)
+				return Action{ID: "copy-file", Operation: "copy", Source: "source.txt", Destination: "source.txt", ExpectedSHA256: calculateSHA256([]byte(content))}
+			},
+			expectedCode: "FILE_ALREADY_EXISTS",
+		},
 	}
 
-	_, _, _, responseError := executeCopyAction(workspace, action, 0)
-	assertResponseErrorCode(t, responseError, "SYMLINK_NOT_SUPPORTED")
-	assertFileContent(t, filepath.Join(workspace, "source.txt"), content)
-	assertPathDoesNotExist(t, filepath.Join(workspace, "destination.txt"))
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			action := test.setup(t, workspace)
+
+			_, _, _, responseError := executeCopyAction(workspace, action, 0)
+			assertResponseErrorCode(t, responseError, test.expectedCode)
+			assertPathDoesNotExist(t, filepath.Join(workspace, "destination.txt"))
+		})
+	}
 }

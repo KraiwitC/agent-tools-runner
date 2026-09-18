@@ -1,6 +1,10 @@
 package runner
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestExecuteReadRangeActionReturnsRequestedLines(t *testing.T) {
 	workspace := t.TempDir()
@@ -125,4 +129,22 @@ func TestExecuteReadRangeActionRejectsOutsidePath(t *testing.T) {
 
 	_, responseError := executeReadRangeAction(workspace, action, 0)
 	assertResponseErrorCode(t, responseError, "PATH_OUTSIDE_WORKSPACE")
+}
+
+func TestExecuteReadRangeActionRejectsSymlinkParent(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "real/lines.txt", "first\nsecond\n")
+	if err := os.Symlink(filepath.Join(workspace, "real"), filepath.Join(workspace, "linked")); err != nil {
+		t.Skipf("symbolic links are unavailable in this environment: %v", err)
+	}
+	action := Action{
+		ID:        "read-range",
+		Operation: "read_range",
+		Path:      filepath.Join("linked", "lines.txt"),
+		StartLine: 1,
+		EndLine:   1,
+	}
+
+	_, responseError := executeReadRangeAction(workspace, action, 0)
+	assertResponseErrorCode(t, responseError, "SYMLINK_NOT_SUPPORTED")
 }

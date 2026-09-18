@@ -128,6 +128,55 @@ func TestExecuteInspectActionRejectsSymbolicLink(t *testing.T) {
 	assertResponseErrorCode(t, responseError, "SYMLINK_NOT_SUPPORTED")
 }
 
+func TestExecuteInspectActionRejectsSymbolicLinkParent(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "real/file.txt", "content")
+	if err := os.Symlink(filepath.Join(workspace, "real"), filepath.Join(workspace, "linked")); err != nil {
+		t.Skipf("symbolic links are unavailable in this environment: %v", err)
+	}
+	action := Action{ID: "inspect-path", Operation: "inspect", Path: filepath.Join("linked", "file.txt")}
+
+	_, responseError := executeInspectAction(workspace, action, 0)
+	assertResponseErrorCode(t, responseError, "SYMLINK_NOT_SUPPORTED")
+}
+
+func TestExecuteInspectActionRejectsOversizedPreviewWithNullByte(t *testing.T) {
+	workspace := t.TempDir()
+	content := append([]byte("before\x00after"), []byte(strings.Repeat("a", int(maximumFileSize)))...)
+	path := filepath.Join(workspace, "large.txt")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("write oversized test file: %v", err)
+	}
+	action := Action{ID: "inspect-file", Operation: "inspect", Path: "large.txt"}
+
+	data, responseError := executeInspectAction(workspace, action, 0)
+	assertResponseErrorCode(t, responseError, "UNSUPPORTED_FILE")
+	if data == nil || data.Path != "large.txt" || data.Type != "file" {
+		t.Fatalf("unexpected inspect error metadata: %#v", data)
+	}
+}
+
+func TestExecuteInspectActionTrimsInvalidUTF8FromOversizedPreview(t *testing.T) {
+	workspace := t.TempDir()
+	content := append([]byte{0xff, 0xfe}, []byte(strings.Repeat("a", int(maximumFileSize)))...)
+	path := filepath.Join(workspace, "large.txt")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("write oversized test file: %v", err)
+	}
+	action := Action{ID: "inspect-file", Operation: "inspect", Path: "large.txt"}
+
+	data, responseError := executeInspectAction(workspace, action, 0)
+	if responseError != nil {
+		t.Fatalf("executeInspectAction returned an error: %#v", responseError)
+	}
+	if data.Path != "large.txt" || data.Type != "file" || !data.Truncated {
+		t.Fatalf("unexpected inspect metadata: %#v", data)
+	}
+	if data.Content != "" || !utf8.ValidString(data.Content) {
+		t.Fatalf("invalid UTF-8 preview was not trimmed safely: %q", data.Content)
+	}
+}
+
 func TestReadWorkspaceFileReturnsSHA256(t *testing.T) {
 	workspace := t.TempDir()
 	content := "content"

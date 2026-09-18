@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -381,6 +382,12 @@ func isValidSHA256(value string) bool {
 	return err == nil
 }
 
+type batchEditState struct {
+	ResolvedPath   string
+	OriginalSHA256 string
+	CurrentSHA256  string
+}
+
 func ExecuteRequest(workspace string, request Request) string {
 	response := Response{
 		Version: protocolVersion,
@@ -388,15 +395,47 @@ func ExecuteRequest(workspace string, request Request) string {
 		Results: make([]ActionResult, 0, len(request.Actions)),
 	}
 	maxTransferChars := MaximumTransferChars()
+	batchEdits := make([]batchEditState, 0)
 
 	for actionIndex, action := range request.Actions {
 		if isModifyingOperation(action.Operation) && !modifyingActionResultFits(response, action, actionIndex, maxTransferChars) {
 			return createTransferLimitResponse(response, action, actionIndex, maxTransferChars)
 		}
 
+		originalExpectedSHA256 := action.ExpectedSHA256
+		editStateIndex := -1
+		editResolvedPath := ""
+		if action.Operation == "edit" {
+			var editFileInfo os.FileInfo
+			editResolvedPath, _, editFileInfo, _ = resolveWorkspaceFile(workspace, action.Path)
+			if editFileInfo != nil {
+				for stateIndex, state := range batchEdits {
+					stateFileInfo, err := os.Stat(state.ResolvedPath)
+					if err == nil && os.SameFile(editFileInfo, stateFileInfo) {
+						editStateIndex = stateIndex
+						if action.ExpectedSHA256 == state.OriginalSHA256 {
+							action.ExpectedSHA256 = state.CurrentSHA256
+						}
+						break
+					}
+				}
+			}
+		}
+
 		result, responseError := executeAction(workspace, action, actionIndex)
 		if responseError != nil {
 			return finishActionError(response, result, responseError, action, actionIndex, maxTransferChars)
+		}
+		if action.Operation == "edit" && result.Data != nil {
+			if editStateIndex >= 0 {
+				batchEdits[editStateIndex].CurrentSHA256 = result.Data.SHA256
+			} else {
+				batchEdits = append(batchEdits, batchEditState{
+					ResolvedPath:   editResolvedPath,
+					OriginalSHA256: originalExpectedSHA256,
+					CurrentSHA256:  result.Data.SHA256,
+				})
+			}
 		}
 
 		result, truncated := fitSuccessfulResult(response, result, action, actionIndex, maxTransferChars)

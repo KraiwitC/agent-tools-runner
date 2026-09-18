@@ -2,10 +2,12 @@ package runner
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -55,14 +57,39 @@ func TestExecuteCreateActionRejectsExistingTargetWithoutChangingIt(t *testing.T)
 	assertNoTemporaryCreateFiles(t, workspace)
 }
 
-func TestExecuteCreateActionRejectsMissingParentDirectory(t *testing.T) {
-	workspace := t.TempDir()
-	action := Action{ID: "create-file", Operation: "create", Path: "missing/created.txt", Content: "content"}
+func TestExecuteCreateActionRejectsInvalidParent(t *testing.T) {
+	tests := []struct {
+		name         string
+		setup        func(t *testing.T, workspace string)
+		expectedCode string
+	}{
+		{
+			name:         "missing parent directory",
+			expectedCode: "PARENT_DIRECTORY_NOT_FOUND",
+		},
+		{
+			name: "parent is a regular file",
+			setup: func(t *testing.T, workspace string) {
+				writeTestFile(t, workspace, "parent", "not a directory")
+			},
+			expectedCode: "UNSUPPORTED_FILE",
+		},
+	}
 
-	_, _, responseError := executeCreateAction(workspace, action, 0)
-	assertResponseErrorCode(t, responseError, "PARENT_DIRECTORY_NOT_FOUND")
-	assertPathDoesNotExist(t, filepath.Join(workspace, "missing", "created.txt"))
-	assertNoTemporaryCreateFiles(t, workspace)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			if test.setup != nil {
+				test.setup(t, workspace)
+			}
+			action := Action{ID: "create-file", Operation: "create", Path: "parent/created.txt", Content: "content"}
+
+			_, _, responseError := executeCreateAction(workspace, action, 0)
+			assertResponseErrorCode(t, responseError, test.expectedCode)
+			assertPathDoesNotExist(t, filepath.Join(workspace, "parent", "created.txt"))
+			assertNoTemporaryCreateFiles(t, workspace)
+		})
+	}
 }
 
 func TestExecuteCreateActionRejectsAbsolutePath(t *testing.T) {
@@ -161,17 +188,6 @@ func TestExecuteCreateActionRejectsOversizedContent(t *testing.T) {
 	assertNoTemporaryCreateFiles(t, workspace)
 }
 
-func TestExecuteCreateActionLeavesNoTemporaryFileAfterSuccess(t *testing.T) {
-	workspace := t.TempDir()
-	action := Action{ID: "create-file", Operation: "create", Path: "created.txt", Content: "content"}
-
-	_, _, responseError := executeCreateAction(workspace, action, 0)
-	if responseError != nil {
-		t.Fatalf("executeCreateAction returned an error: %#v", responseError)
-	}
-	assertNoTemporaryCreateFiles(t, workspace)
-}
-
 func TestExecuteRequestStopsAfterFailedCreateAndPreservesEarlierResult(t *testing.T) {
 	workspace := t.TempDir()
 	writeTestFile(t, workspace, "existing.txt", "original")
@@ -232,7 +248,7 @@ func assertNoTemporaryCreateFiles(t *testing.T, root string) {
 func assertPathDoesNotExist(t *testing.T, path string) {
 	t.Helper()
 	_, err := os.Lstat(path)
-	if !os.IsNotExist(err) {
+	if !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTDIR) {
 		t.Fatalf("expected path not to exist, got error %v", err)
 	}
 }

@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -61,102 +62,12 @@ func TestParseAndValidateRequestAcceptsRankedSearch(t *testing.T) {
 	}
 }
 
-func TestParseAndValidateRequestRejectsShortRankedSearchQuery(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"ranked-search","operation":"ranked_search","query":"a"}]}`
-
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected short ranked_search query validation error")
-	}
-}
-
 func TestParseAndValidateRequestRejectsRankedSearchWithoutLettersOrDigits(t *testing.T) {
 	requestText := `{"version":"1","actions":[{"id":"ranked-search","operation":"ranked_search","query":"_-"}]}`
 
 	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected ranked_search query validation error")
-	}
-}
-
-func TestParseAndValidateRequestRejectsRankedSearchPath(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"ranked-search","operation":"ranked_search","query":"move","path":"move.go"}]}`
-
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected unsupported ranked_search path validation error")
-	}
-}
-
-func TestParseAndValidateRequestRejectsEmptyCreateContent(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"create","operation":"create","path":"created.txt","content":""}]}`
-
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected empty create content validation error")
-	}
-}
-
-func TestParseAndValidateRequestRejectsCreateReplacements(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"create","operation":"create","path":"created.txt","content":"content","replacements":[{"oldText":"old","newText":"new"}]}]}`
-
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected create replacements validation error")
-	}
-}
-
-func TestParseAndValidateRequestRejectsCopyWithoutDestination(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"copy","operation":"copy","source":"source.txt","expectedSha256":"0000000000000000000000000000000000000000000000000000000000000000"}]}`
-
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected missing copy destination validation error")
-	}
-}
-
-func TestParseAndValidateRequestRejectsMoveWithoutSHA256(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"move","operation":"move","source":"source.txt","destination":"moved.txt"}]}`
-
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected missing move SHA-256 validation error")
-	}
-}
-
-func TestParseAndValidateRequestRejectsEditContent(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","content":"content","expectedSha256":"0000000000000000000000000000000000000000000000000000000000000000","replacements":[{"oldText":"old","newText":"new"}]}]}`
-
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected edit content validation error")
-	}
-}
-
-func TestParseAndValidateRequestRejectsEmptyEditOldText(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","expectedSha256":"0000000000000000000000000000000000000000000000000000000000000000","replacements":[{"oldText":"","newText":"new"}]}]}`
-
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected empty edit oldText validation error")
-	}
-}
-
-func TestParseAndValidateRequestRejectsMissingEditSHA256(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","replacements":[{"oldText":"old","newText":"new"}]}]}`
-
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected missing edit SHA-256 validation error")
-	}
-}
-
-func TestParseAndValidateRequestRejectsInvalidEditSHA256(t *testing.T) {
-	requestText := `{"version":"1","actions":[{"id":"edit","operation":"edit","path":"main.go","expectedSha256":"INVALID","replacements":[{"oldText":"old","newText":"new"}]}]}`
-
-	_, err := ParseAndValidateRequest(requestText)
-	if err == nil {
-		t.Fatal("expected invalid edit SHA-256 validation error")
 	}
 }
 
@@ -357,6 +268,137 @@ func TestExecuteRequestDropsOversizedErrorResult(t *testing.T) {
 	}
 }
 
+func TestExecuteRequestAllowsMultipleEditsToSameFileWithOriginalHash(t *testing.T) {
+	workspace := t.TempDir()
+	original := "alpha beta gamma"
+	path := writeTestFile(t, workspace, "edit.txt", original)
+	originalSHA256 := calculateSHA256([]byte(original))
+
+	request := Request{
+		Version: protocolVersion,
+		Actions: []Action{
+			{
+				ID:             "edit-alpha",
+				Operation:      "edit",
+				Path:           "edit.txt",
+				ExpectedSHA256: originalSHA256,
+				Replacements: []Replacement{
+					{OldText: "alpha", NewText: "A"},
+				},
+			},
+			{
+				ID:             "edit-gamma",
+				Operation:      "edit",
+				Path:           "edit.txt",
+				ExpectedSHA256: originalSHA256,
+				Replacements: []Replacement{
+					{OldText: "gamma", NewText: "G"},
+				},
+			},
+		},
+	}
+
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "success" || len(response.Results) != 2 {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	firstExpectedSHA256 := calculateSHA256([]byte("A beta gamma"))
+	if response.Results[0].Data == nil || response.Results[0].Data.SHA256 != firstExpectedSHA256 {
+		t.Fatalf("unexpected first edit result: %#v", response.Results[0])
+	}
+	finalExpectedSHA256 := calculateSHA256([]byte("A beta G"))
+	if response.Results[1].Data == nil || response.Results[1].Data.SHA256 != finalExpectedSHA256 {
+		t.Fatalf("unexpected second edit result: %#v", response.Results[1])
+	}
+	assertFileContent(t, path, "A beta G")
+}
+
+func TestExecuteRequestAllowsMultipleEditsThroughCaseVariantPath(t *testing.T) {
+	workspace := t.TempDir()
+	original := "alpha beta gamma"
+	path := writeTestFile(t, workspace, "edit.txt", original)
+	caseVariantPath := workspace + "/EDIT.TXT"
+
+	originalInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("inspect original path: %v", err)
+	}
+	caseVariantInfo, err := os.Stat(caseVariantPath)
+	if err != nil || !os.SameFile(originalInfo, caseVariantInfo) {
+		t.Skip("filesystem is case-sensitive")
+	}
+
+	originalSHA256 := calculateSHA256([]byte(original))
+	request := Request{
+		Version: protocolVersion,
+		Actions: []Action{
+			{
+				ID:             "edit-alpha",
+				Operation:      "edit",
+				Path:           "edit.txt",
+				ExpectedSHA256: originalSHA256,
+				Replacements: []Replacement{
+					{OldText: "alpha", NewText: "A"},
+				},
+			},
+			{
+				ID:             "edit-gamma",
+				Operation:      "edit",
+				Path:           "EDIT.TXT",
+				ExpectedSHA256: originalSHA256,
+				Replacements: []Replacement{
+					{OldText: "gamma", NewText: "G"},
+				},
+			},
+		},
+	}
+
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "success" || len(response.Results) != 2 {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	assertFileContent(t, path, "A beta G")
+}
+
+func TestExecuteRequestRejectsLaterSameFileEditWithDifferentOriginalHash(t *testing.T) {
+	workspace := t.TempDir()
+	original := "alpha beta gamma"
+	path := writeTestFile(t, workspace, "edit.txt", original)
+
+	request := Request{
+		Version: protocolVersion,
+		Actions: []Action{
+			{
+				ID:             "edit-alpha",
+				Operation:      "edit",
+				Path:           "edit.txt",
+				ExpectedSHA256: calculateSHA256([]byte(original)),
+				Replacements: []Replacement{
+					{OldText: "alpha", NewText: "A"},
+				},
+			},
+			{
+				ID:             "edit-gamma",
+				Operation:      "edit",
+				Path:           "edit.txt",
+				ExpectedSHA256: calculateSHA256([]byte("different original")),
+				Replacements: []Replacement{
+					{OldText: "gamma", NewText: "G"},
+				},
+			},
+		},
+	}
+
+	response := executeRequestForTest(t, workspace, request)
+	if response.Status != "error" || response.Error == nil || response.Error.Code != "FILE_CHANGED" {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	if len(response.Results) != 2 || response.Results[0].Status != "success" || response.Results[1].Status != "error" {
+		t.Fatalf("unexpected action results: %#v", response.Results)
+	}
+	assertFileContent(t, path, "A beta gamma")
+}
+
 func TestExecuteRequestStopsAfterFirstFailure(t *testing.T) {
 	workspace := t.TempDir()
 	writeTestFile(t, workspace, "first.txt", "first")
@@ -462,6 +504,137 @@ func TestParseAndValidateRequestRejectsMultipleObjects(t *testing.T) {
 	_, err := ParseAndValidateRequest(requestText)
 	if err == nil {
 		t.Fatal("expected multiple JSON objects to be rejected")
+	}
+}
+
+func TestValidateRequestReadRangeBoundaries(t *testing.T) {
+	tests := []struct {
+		name      string
+		startLine int
+		endLine   int
+		wantError bool
+	}{
+		{name: "exactly one thousand lines", startLine: 1, endLine: 1000},
+		{name: "one thousand lines from offset", startLine: 50, endLine: 1049},
+		{name: "one thousand and one lines", startLine: 1, endLine: 1001, wantError: true},
+		{name: "zero start line", startLine: 0, endLine: 1, wantError: true},
+		{name: "negative start line", startLine: -1, endLine: 1, wantError: true},
+		{name: "end before start", startLine: 2, endLine: 1, wantError: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateRequest(Request{
+				Version: protocolVersion,
+				Actions: []Action{
+					{ID: "read-range", Operation: "read_range", Path: "file.txt", StartLine: test.startLine, EndLine: test.endLine},
+				},
+			})
+			if test.wantError && err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !test.wantError && err != nil {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateRequestRejectsUnsupportedOperationFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		action Action
+	}{
+		{name: "search with path", action: Action{ID: "search", Operation: "search", Query: "needle", Path: "file.txt"}},
+		{name: "ranked search with paths", action: Action{ID: "ranked-search", Operation: "ranked_search", Query: "needle", Paths: []string{"file.txt"}}},
+		{name: "read with query", action: Action{ID: "read", Operation: "read", Paths: []string{"file.txt"}, Query: "needle"}},
+		{name: "read range with content", action: Action{ID: "read-range", Operation: "read_range", Path: "file.txt", StartLine: 1, EndLine: 1, Content: "content"}},
+		{name: "edit with source", action: Action{ID: "edit", Operation: "edit", Path: "file.txt", Source: "source.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength), Replacements: []Replacement{{OldText: "old", NewText: "new"}}}},
+		{name: "create with expected hash", action: Action{ID: "create", Operation: "create", Path: "file.txt", Content: "content", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
+		{name: "copy with path", action: Action{ID: "copy", Operation: "copy", Path: "file.txt", Source: "source.txt", Destination: "destination.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
+		{name: "move with replacements", action: Action{ID: "move", Operation: "move", Source: "source.txt", Destination: "destination.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength), Replacements: []Replacement{{OldText: "old", NewText: "new"}}}},
+		{name: "tree with query", action: Action{ID: "tree", Operation: "tree", Path: ".", Query: "needle"}},
+		{name: "inspect with content", action: Action{ID: "inspect", Operation: "inspect", Path: "file.txt", Content: "content"}},
+		{name: "mkdir with expected hash", action: Action{ID: "mkdir", Operation: "mkdir", Path: "directory", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
+		{name: "delete with content", action: Action{ID: "delete", Operation: "delete", Path: "file.txt", Content: "content"}},
+		{name: "search with range fields", action: Action{ID: "search", Operation: "search", Query: "needle", StartLine: 1, EndLine: 1}},
+		{name: "tree with source", action: Action{ID: "tree", Operation: "tree", Path: ".", Source: "source.txt"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateRequest(Request{Version: protocolVersion, Actions: []Action{test.action}})
+			if err == nil {
+				t.Fatal("expected unsupported field validation error")
+			}
+		})
+	}
+}
+
+func TestValidateRequestRejectsMissingRequiredFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		action Action
+	}{
+		{name: "search query", action: Action{ID: "search", Operation: "search"}},
+		{name: "read paths", action: Action{ID: "read", Operation: "read"}},
+		{name: "read empty path", action: Action{ID: "read", Operation: "read", Paths: []string{""}}},
+		{name: "read range path", action: Action{ID: "read-range", Operation: "read_range", StartLine: 1, EndLine: 1}},
+		{name: "edit path", action: Action{ID: "edit", Operation: "edit", ExpectedSHA256: strings.Repeat("0", sha256HexLength), Replacements: []Replacement{{OldText: "old", NewText: "new"}}}},
+		{name: "edit replacements", action: Action{ID: "edit", Operation: "edit", Path: "file.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
+		{name: "create path", action: Action{ID: "create", Operation: "create", Content: "content"}},
+		{name: "create content", action: Action{ID: "create", Operation: "create", Path: "file.txt"}},
+		{name: "copy source", action: Action{ID: "copy", Operation: "copy", Destination: "destination.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
+		{name: "copy destination", action: Action{ID: "copy", Operation: "copy", Source: "source.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
+		{name: "move source", action: Action{ID: "move", Operation: "move", Destination: "destination.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
+		{name: "move destination", action: Action{ID: "move", Operation: "move", Source: "source.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
+		{name: "tree path", action: Action{ID: "tree", Operation: "tree"}},
+		{name: "inspect path", action: Action{ID: "inspect", Operation: "inspect"}},
+		{name: "mkdir path", action: Action{ID: "mkdir", Operation: "mkdir"}},
+		{name: "delete path", action: Action{ID: "delete", Operation: "delete"}},
+		{name: "action ID", action: Action{Operation: "search", Query: "needle"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateRequest(Request{Version: protocolVersion, Actions: []Action{test.action}})
+			if err == nil {
+				t.Fatal("expected missing field validation error")
+			}
+		})
+	}
+}
+
+func TestValidateRequestRejectsInvalidSHA256Variants(t *testing.T) {
+	tests := []struct {
+		name   string
+		value  string
+		action func(hash string) Action
+	}{
+		{name: "edit missing hash", value: "", action: func(hash string) Action {
+			return Action{ID: "edit", Operation: "edit", Path: "file.txt", ExpectedSHA256: hash, Replacements: []Replacement{{OldText: "old", NewText: "new"}}}
+		}},
+		{name: "edit short hash", value: "abc", action: func(hash string) Action {
+			return Action{ID: "edit", Operation: "edit", Path: "file.txt", ExpectedSHA256: hash, Replacements: []Replacement{{OldText: "old", NewText: "new"}}}
+		}},
+		{name: "copy uppercase hash", value: strings.Repeat("A", sha256HexLength), action: func(hash string) Action {
+			return Action{ID: "copy", Operation: "copy", Source: "source.txt", Destination: "destination.txt", ExpectedSHA256: hash}
+		}},
+		{name: "move non-hex hash", value: strings.Repeat("z", sha256HexLength), action: func(hash string) Action {
+			return Action{ID: "move", Operation: "move", Source: "source.txt", Destination: "destination.txt", ExpectedSHA256: hash}
+		}},
+		{name: "delete invalid optional hash", value: "invalid", action: func(hash string) Action {
+			return Action{ID: "delete", Operation: "delete", Path: "file.txt", ExpectedSHA256: hash}
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateRequest(Request{Version: protocolVersion, Actions: []Action{test.action(test.value)}})
+			if err == nil {
+				t.Fatal("expected SHA-256 validation error")
+			}
+		})
 	}
 }
 
