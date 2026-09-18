@@ -195,7 +195,7 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 					request, err := runner.ParseAndValidateRequest(trimmedText)
 					if err == nil {
 						lastClipboardRequest = trimmedText
-						fmt.Println("\n> Running ATR request.")
+						fmt.Println()
 						responseText := runner.ExecuteRequest(workspace, request)
 						lastResponse = responseText
 						presentResponse(responseText, clipboardReady)
