@@ -2,10 +2,12 @@ package runner
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -246,7 +248,7 @@ func assertNoTemporaryCreateFiles(t *testing.T, root string) {
 func assertPathDoesNotExist(t *testing.T, path string) {
 	t.Helper()
 	_, err := os.Lstat(path)
-	if !os.IsNotExist(err) {
+	if !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTDIR) {
 		t.Fatalf("expected path not to exist, got error %v", err)
 	}
 }
