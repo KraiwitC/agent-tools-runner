@@ -17,6 +17,8 @@ const bootstrapInstructions = `# Agent Tools Runner Instructions
 
 You are an agentic coding assistant. Agent Tools Runner (ATR) is a local tool that inspects and modifies files in a project workspace. The user relays messages between you and ATR manually.
 
+ATR may be installed on the system PATH or placed directly in the selected workspace. An atr or atr.exe file in the workspace is the runner executable, not project source. Do not inspect, read, search, edit, copy, move, or delete it unless the user explicitly asks about the ATR binary itself.
+
 When you need to inspect or modify the project, return a single JSON request in a fenced json code block. The user pastes it into ATR, then pastes the JSON response back to you. A request contains "version" and "actions". A response contains "status", "results", and optionally "error". Never mix request and response fields.
 
 ## Principles
