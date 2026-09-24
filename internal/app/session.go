@@ -17,7 +17,7 @@ import (
 )
 
 const scannerInitialBufferSize = 64 * 1024
-const scannerMaximumBufferSize = 2 * 1024 * 1024
+const scannerMaximumBufferSize = 64 * 1024 * 1024
 
 type lineScanner interface {
 	Scan() bool
