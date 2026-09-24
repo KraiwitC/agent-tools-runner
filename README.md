@@ -2,6 +2,27 @@
 
 Agent Tools Runner (`atr`) is a human-in-the-loop agent harness that turns any chat-only LLM into a coding agent for your local workspace.
 
+## Download
+
+Download the latest prebuilt binary from the [GitHub Releases](https://github.com/KraiwitC/agent-tools-runner/releases) page.
+
+Available platforms:
+
+- Windows AMD64
+- macOS ARM64
+- Linux AMD64
+
+Run ATR from the project directory you want it to access, or select another directory with `--workspace`.
+
+## Safety boundaries
+
+- ATR keeps filesystem access inside the selected workspace.
+- Symbolic links are rejected.
+- File operations are limited to files of at most 10 MiB.
+- Existing destinations are not overwritten by create, copy, or move operations.
+- Directory deletion is limited to empty directories.
+- ATR does not execute shell commands.
+
 ## Supported operations
 
 - `tree`: List a bounded directory tree.
@@ -74,5 +95,3 @@ macOS or Linux:
 go build -o dist/atr ./cmd/atr
 GOOS=windows GOARCH=amd64 go build -o dist/atr.exe ./cmd/atr
 ```
-
-Run the compiled program from the project directory, or pass `--workspace` to select another project.
