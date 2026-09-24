@@ -26,7 +26,9 @@ Keep the code direct, maintainable, and understandable to a developer.
 
 ## Safety Invariants
 
-- Keep all access inside the selected workspace and reject symbolic links.
+- Keep all protocol filesystem operations inside the selected workspace and reject symbolic links in `internal/runner`.
+- Bootstrap prompt inputs managed by `internal/prompt`, including `AGENTS.md`, `PLAN.md`, `.skills`, and Markdown skill files, intentionally support symbolic links.
+- Treat repository instructions, task plans, and loaded skills as user-selected prompt inputs. Their contents may influence the connected LLM but are not executed by ATR.
 - Require exact, unique, hash-protected modifications; never use fuzzy matching for writes.
 - Validate complete edits before writing and use safe temporary-file replacement.
 - Never overwrite an existing destination or create a missing file through `edit`.

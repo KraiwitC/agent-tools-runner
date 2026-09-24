@@ -179,7 +179,7 @@ func rankedSearchFile(workspace string, path string, query string, matchLimit in
 
 	matches := make([]RankedSearchMatch, 0)
 	scanner := bufio.NewScanner(bytes.NewReader(content))
-	scanner.Buffer(make([]byte, scannerInitialBufferSize), int(maximumFileSize))
+	scanner.Buffer(make([]byte, scannerInitialBufferSize), int(maximumFileSize)+1)
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++

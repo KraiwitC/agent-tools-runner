@@ -23,7 +23,7 @@ func executeCreateAction(workspace string, action Action, actionIndex int) (int,
 			ActionID:    action.ID,
 			ActionIndex: actionIndex,
 			Code:        "FILE_TOO_LARGE",
-			Message:     "Content exceeds the 1 MiB file-size limit.",
+			Message:     "Content exceeds the 10 MiB file-size limit.",
 			Path:        relativePath,
 		}
 	}

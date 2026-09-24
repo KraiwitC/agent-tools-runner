@@ -140,7 +140,7 @@ func searchFile(workspace string, path string, query string, matchLimit int) ([]
 
 	matches := make([]SearchMatch, 0)
 	scanner := bufio.NewScanner(bytes.NewReader(content))
-	scanner.Buffer(make([]byte, scannerInitialBufferSize), int(maximumFileSize))
+	scanner.Buffer(make([]byte, scannerInitialBufferSize), int(maximumFileSize)+1)
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++

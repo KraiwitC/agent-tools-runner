@@ -184,6 +184,9 @@ func TestExecuteCreateActionRejectsOversizedContent(t *testing.T) {
 
 	_, _, responseError := executeCreateAction(workspace, action, 0)
 	assertResponseErrorCode(t, responseError, "FILE_TOO_LARGE")
+	if responseError.Message != "Content exceeds the 10 MiB file-size limit." {
+		t.Fatalf("unexpected error message: %q", responseError.Message)
+	}
 	assertPathDoesNotExist(t, filepath.Join(workspace, "large.txt"))
 	assertNoTemporaryCreateFiles(t, workspace)
 }
