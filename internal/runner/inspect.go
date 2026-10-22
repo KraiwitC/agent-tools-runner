@@ -2,6 +2,8 @@ package runner
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -42,7 +44,19 @@ func executeInspectAction(workspace string, action Action, actionIndex int) (*Ac
 		if err != nil || !isSupportedText(content) {
 			return &ActionData{Path: relativePath, Type: "file"}, newActionResponseError(action, actionIndex, "UNSUPPORTED_FILE", "Could not preview the requested UTF-8 text file.", relativePath)
 		}
-		return &ActionData{Path: relativePath, Type: "file", Content: string(content), SizeBytes: fileInfo.Size(), Truncated: true}, nil
+		sha256Hash, lineCount, streamErr := streamFileMetadata(resolvedPath)
+		if streamErr != nil {
+			return &ActionData{Path: relativePath, Type: "file"}, workspaceResponseError(action, actionIndex, streamErr, "READ_FAILED", "Could not inspect the requested path.", filepath.ToSlash(filepath.Clean(action.Path)))
+		}
+		return &ActionData{
+			Path:      relativePath,
+			Type:      "file",
+			Content:   string(content),
+			SizeBytes: fileInfo.Size(),
+			LineCount: lineCount,
+			SHA256:    sha256Hash,
+			Truncated: true,
+		}, nil
 	}
 
 	content, err := readTextFile(resolvedPath, relativePath, "Could not open the requested file.", "Could not read the requested file.")
@@ -115,4 +129,41 @@ func countFileLines(content []byte) int {
 		lineCount++
 	}
 	return lineCount
+}
+
+func streamFileMetadata(path string) (string, int, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	buffer := make([]byte, 64*1024)
+	lineCount := 0
+	lastByte := byte(0)
+	hasBytes := false
+
+	for {
+		bytesRead, readErr := file.Read(buffer)
+		if bytesRead > 0 {
+			chunk := buffer[:bytesRead]
+			hasher.Write(chunk)
+			lineCount += bytes.Count(chunk, []byte{'\n'})
+			lastByte = chunk[bytesRead-1]
+			hasBytes = true
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return "", 0, readErr
+		}
+	}
+
+	if hasBytes && lastByte != '\n' {
+		lineCount++
+	}
+
+	return hex.EncodeToString(hasher.Sum(nil)), lineCount, nil
 }

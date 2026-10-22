@@ -1,8 +1,6 @@
 package clipboard
 
 import (
-	"time"
-
 	"golang.design/x/clipboard"
 )
 
@@ -20,18 +18,4 @@ func Copy(text string) {
 
 func Read() string {
 	return string(clipboard.Read(clipboard.FmtText))
-}
-
-func Monitor(interval time.Duration, callback func(string)) {
-	go func() {
-		lastText := Read()
-		for {
-			currentText := Read()
-			if currentText != "" && currentText != lastText {
-				lastText = currentText
-				callback(currentText)
-			}
-			time.Sleep(interval)
-		}
-	}()
 }
