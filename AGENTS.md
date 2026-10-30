@@ -29,7 +29,7 @@ Keep the code direct, maintainable, and understandable to a developer.
 - Keep all protocol filesystem operations inside the selected workspace and reject symbolic links in `internal/runner`.
 - Bootstrap prompt inputs `AGENTS.md` and `PLAN.md`, managed by `internal/prompt`, intentionally support symbolic links. Skills under `.agents/skills` do not: symbolic-link skills are skipped with a warning.
 - Treat repository instructions, task plans, and skill descriptions as user-selected prompt inputs. Their contents may influence the connected LLM but are not executed by ATR.
-- Keep `.agents/` (config and skills) read-only to protocol operations; reject modifications with `PROTECTED_PATH`.
+- Keep `.agents/` (config and skills) and `.git/` read-only to protocol operations; reject modifications with `PROTECTED_PATH`.
 - Require exact, unique, hash-protected modifications; never use fuzzy matching for writes.
 - Validate complete edits before writing and use safe temporary-file replacement.
 - Never overwrite an existing destination or create a missing file through `edit`.

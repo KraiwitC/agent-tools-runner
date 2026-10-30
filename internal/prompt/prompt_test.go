@@ -171,7 +171,7 @@ func TestCreateIncludesPromptGuidance(t *testing.T) {
 	for _, expected := range []string{
 		"<a href=...>",
 		"Do not create a file and then edit it in the same request.",
-		"The .agents folder is read-only",
+		"The .agents and .git folders are read-only",
 		"- BASH_NOT_ALLOWED:",
 		"- BASH_FAILED:",
 		"- BASH_TIMEOUT:",

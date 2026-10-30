@@ -127,14 +127,14 @@ const bashEnabledInstructions = `### Execution Operations
 bash: Run an allowlisted command in the workspace. Commands run in PowerShell on Windows and in bash elsewhere. Each action starts a fresh process, so no shell state such as cd or variables persists between actions. timeoutSeconds is optional. A non-zero exitCode is returned as data, not as an ATR error. stdout and stderr may be trimmed to fit the transfer limit. Pipes, redirects, chaining, and substitution are not supported: ATR rejects shell control characters even inside quotes.
 Example: {"id":"b1","operation":"bash","command":"go test ./...","timeoutSeconds":20}
 
-Use bash only when no structured operation can do the job. If a command may run long, ask the user to run it manually. If a needed command is not allowed, suggest the user add it to bash.allow in .agents/atr.json and run /prompt. The .agents folder is read-only.
+Use bash only when no structured operation can do the job. If a command may run long, ask the user to run it manually. If a needed command is not allowed, suggest the user add it to bash.allow in .agents/atr.json and run /prompt. The .agents and .git folders are read-only.
 
 Allowed bash commands (a command is allowed when it starts with one of these entries):
 `
 
 const bashDisabledInstructions = `### Execution Operations
 
-bash is disabled because no commands are allowed. Do not return bash actions. If a command is needed, suggest the user add it to bash.allow in .agents/atr.json (run /init first if the folder does not exist) and run /prompt. The .agents folder is read-only: do not attempt to modify anything under it.
+bash is disabled because no commands are allowed. Do not return bash actions. If a command is needed, suggest the user add it to bash.allow in .agents/atr.json (run /init first if the folder does not exist) and run /prompt. The .agents and .git folders are read-only: do not attempt to modify anything under them.
 `
 
 const bootstrapInstructionsEnd = `

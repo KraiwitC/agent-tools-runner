@@ -12,6 +12,9 @@ import (
 const AgentsDirectoryName = ".agents"
 const ConfigFileName = "atr.json"
 const ConfigDisplayPath = AgentsDirectoryName + "/" + ConfigFileName
+const gitDirectoryName = ".git"
+
+var protectedDirectoryNames = []string{AgentsDirectoryName, gitDirectoryName}
 
 type Config struct {
 	Bash BashConfig `json:"bash"`
@@ -81,7 +84,7 @@ func protectedPathError(workspace string, action Action, actionIndex int) *Respo
 	}
 	for _, requestedPath := range []string{action.Path, action.Source, action.Destination} {
 		if requestedPath != "" && isProtectedPath(workspace, requestedPath) {
-			return newActionResponseError(action, actionIndex, "PROTECTED_PATH", "The .agents folder is read-only to ATR operations.", filepath.ToSlash(filepath.Clean(requestedPath)))
+			return newActionResponseError(action, actionIndex, "PROTECTED_PATH", "The .agents and .git folders are read-only to ATR operations.", filepath.ToSlash(filepath.Clean(requestedPath)))
 		}
 	}
 	return nil
@@ -100,14 +103,21 @@ func isProtectedPath(workspace string, requestedPath string) bool {
 
 	normalizedSegment, _, _ := strings.Cut(firstSegment, ":")
 	normalizedSegment = strings.TrimRight(normalizedSegment, ". ")
-	if strings.EqualFold(normalizedSegment, AgentsDirectoryName) {
-		return true
+	for _, protectedName := range protectedDirectoryNames {
+		if strings.EqualFold(normalizedSegment, protectedName) {
+			return true
+		}
 	}
 
 	segmentInfo, err := os.Lstat(filepath.Join(workspace, firstSegment))
 	if err != nil {
 		return false
 	}
-	agentsInfo, err := os.Lstat(filepath.Join(workspace, AgentsDirectoryName))
-	return err == nil && os.SameFile(segmentInfo, agentsInfo)
+	for _, protectedName := range protectedDirectoryNames {
+		protectedInfo, err := os.Lstat(filepath.Join(workspace, protectedName))
+		if err == nil && os.SameFile(segmentInfo, protectedInfo) {
+			return true
+		}
+	}
+	return false
 }

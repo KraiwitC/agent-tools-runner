@@ -170,6 +170,9 @@ func rejectSymlinkParents(workspace string, relativePath string) error {
 		if fileInfo.Mode()&os.ModeSymlink != 0 {
 			return newWorkspaceError("SYMLINK_NOT_SUPPORTED", "Symbolic links are not supported in Version 1.", filepath.ToSlash(relativePath), nil)
 		}
+		if !fileInfo.IsDir() {
+			return newWorkspaceError("UNSUPPORTED_FILE", "A parent path component is not a directory.", filepath.ToSlash(relativePath), nil)
+		}
 	}
 
 	return nil

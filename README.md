@@ -22,7 +22,7 @@ Run ATR from the project directory you want it to access, or select another dire
 - Existing destinations are not overwritten by create, copy, or move operations.
 - Directory deletion is limited to empty directories.
 - `bash` runs only allowlisted commands from `.agents/atr.json` through the host shell with a capped timeout; every other operation remains workspace-confined.
-- The `.agents` folder is read-only to protocol operations.
+- The `.agents` and `.git` folders are read-only to protocol operations.
 
 ## Supported operations
 

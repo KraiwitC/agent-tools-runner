@@ -148,6 +148,10 @@ func TestExecuteActionRejectsModifyingProtectedPaths(t *testing.T) {
 		{name: "trailing dot", action: Action{Operation: "create", Path: ".agents./atr.json", Content: "{}"}},
 		{name: "trailing space", action: Action{Operation: "create", Path: ".agents /atr.json", Content: "{}"}},
 		{name: "stream suffix", action: Action{Operation: "create", Path: ".agents:stream/atr.json", Content: "{}"}},
+		{name: "edit git config", action: Action{Operation: "edit", Path: ".git/config", ExpectedSHA256: zeroHash, Replacements: []Replacement{{OldText: "a", NewText: "b"}}}},
+		{name: "create git hook", action: Action{Operation: "create", Path: ".git/hooks/pre-commit", Content: "x"}},
+		{name: "mkdir git", action: Action{Operation: "mkdir", Path: ".git"}},
+		{name: "copy git destination", action: Action{Operation: "copy", Source: "a.txt", Destination: ".GIT/config", ExpectedSHA256: zeroHash}},
 	}
 
 	for _, test := range tests {
@@ -159,6 +163,7 @@ func TestExecuteActionRejectsModifyingProtectedPaths(t *testing.T) {
 			_, responseError := executeAction(workspace, test.action, 0, io.Discard)
 			assertResponseErrorCode(t, responseError, "PROTECTED_PATH")
 			assertPathDoesNotExist(t, filepath.Join(workspace, AgentsDirectoryName))
+			assertPathDoesNotExist(t, filepath.Join(workspace, gitDirectoryName))
 			assertPathDoesNotExist(t, filepath.Join(workspace, "b.txt"))
 		})
 	}

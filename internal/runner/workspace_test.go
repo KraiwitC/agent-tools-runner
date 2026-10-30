@@ -3,7 +3,9 @@ package runner
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -121,6 +123,32 @@ func TestReadWorkspaceFileRejectsSymlinkParent(t *testing.T) {
 
 	_, err := readWorkspaceFile(workspace, filepath.Join("linked", "file.txt"))
 	assertWorkspaceErrorCode(t, err, "SYMLINK_NOT_SUPPORTED")
+}
+
+func TestReadWorkspaceFileRejectsFileParent(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "file.txt", "content")
+
+	_, err := readWorkspaceFile(workspace, filepath.Join("file.txt", "child.txt"))
+	assertWorkspaceErrorCode(t, err, "UNSUPPORTED_FILE")
+}
+
+func TestReadWorkspaceFileRejectsJunctionParent(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("directory junctions are Windows-specific")
+	}
+
+	workspace := t.TempDir()
+	outsideDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outsideDirectory, "outside.txt"), []byte("outside"), 0o600); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := exec.Command("cmd", "/c", "mklink", "/J", filepath.Join(workspace, "junction"), outsideDirectory).Run(); err != nil {
+		t.Skipf("directory junctions are unavailable in this environment: %v", err)
+	}
+
+	_, err := readWorkspaceFile(workspace, filepath.Join("junction", "outside.txt"))
+	assertWorkspaceErrorCode(t, err, "UNSUPPORTED_FILE")
 }
 
 func writeTestFile(t *testing.T, workspace string, relativePath string, content string) string {
