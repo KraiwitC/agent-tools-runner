@@ -196,7 +196,7 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 					if err == nil {
 						lastClipboardRequest = trimmedText
 						fmt.Println()
-						responseText := runner.ExecuteRequest(workspace, request)
+						responseText := runner.ExecuteRequest(workspace, request, os.Stdout)
 						lastResponse = responseText
 						presentResponse(responseText, clipboardReady)
 						autoPromptShown = false
@@ -263,7 +263,7 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 			continue
 		}
 
-		responseText := runner.ExecuteRequest(workspace, request)
+		responseText := runner.ExecuteRequest(workspace, request, os.Stdout)
 		lastResponse = responseText
 		presentResponse(responseText, clipboardReady)
 	}

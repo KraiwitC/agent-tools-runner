@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -129,7 +130,7 @@ func TestExecuteRequestPreservesResultWithinTransferLimit(t *testing.T) {
 		},
 	}
 
-	responseText := ExecuteRequest(workspace, request)
+	responseText := ExecuteRequest(workspace, request, io.Discard)
 	var response Response
 	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -413,7 +414,7 @@ func TestExecuteRequestStopsAfterFirstFailure(t *testing.T) {
 		},
 	}
 
-	responseText := ExecuteRequest(workspace, request)
+	responseText := ExecuteRequest(workspace, request, io.Discard)
 	var response Response
 	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -640,7 +641,7 @@ func TestValidateRequestRejectsInvalidSHA256Variants(t *testing.T) {
 
 func executeRequestForTest(t *testing.T, workspace string, request Request) Response {
 	t.Helper()
-	responseText := ExecuteRequest(workspace, request)
+	responseText := ExecuteRequest(workspace, request, io.Discard)
 	if len(responseText) > MaximumTransferChars() {
 		t.Fatalf("response length = %d, want at most %d", len(responseText), MaximumTransferChars())
 	}
@@ -649,4 +650,26 @@ func executeRequestForTest(t *testing.T, workspace string, request Request) Resp
 		t.Fatalf("decode response: %v", err)
 	}
 	return response
+}
+
+func TestMaximumFittingCountMatchesLinearScan(t *testing.T) {
+	for length := 0; length <= 40; length++ {
+		for threshold := 0; threshold <= length; threshold++ {
+			got := maximumFittingCount(length, func(count int) bool { return count <= threshold })
+			if got != threshold {
+				t.Fatalf("length %d threshold %d: got %d", length, threshold, got)
+			}
+		}
+	}
+}
+
+func TestTrimTextToFitKeepsLongestFittingRunes(t *testing.T) {
+	content := "héllo wörld ✓"
+	runes := []rune(content)
+	for limit := 0; limit <= len(runes); limit++ {
+		got := trimTextToFit(content, func(candidate string) bool { return len([]rune(candidate)) <= limit })
+		if got != string(runes[:limit]) {
+			t.Fatalf("limit %d: got %q", limit, got)
+		}
+	}
 }

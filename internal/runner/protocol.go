@@ -16,6 +16,8 @@ const protocolVersion = "1"
 const maximumActions = 100
 const maximumEditReplacements = 100
 const maximumReadRangeLines = 1000
+const defaultBashTimeoutSeconds = 10
+const maximumBashTimeoutSeconds = 30
 const defaultMaximumTransferChars = 120000
 const sha256HexLength = 64
 
@@ -39,6 +41,8 @@ type Action struct {
 	EndLine        int           `json:"endLine,omitempty"`
 	ExpectedSHA256 string        `json:"expectedSha256,omitempty"`
 	Replacements   []Replacement `json:"replacements,omitempty"`
+	Command        string        `json:"command,omitempty"`
+	TimeoutSeconds int           `json:"timeoutSeconds,omitempty"`
 }
 
 type Replacement struct {
@@ -79,6 +83,10 @@ type ActionData struct {
 	Empty               *bool               `json:"empty,omitempty"`
 	ReplacementsApplied int                 `json:"replacementsApplied,omitempty"`
 	BytesWritten        int                 `json:"bytesWritten,omitempty"`
+	Stdout              string              `json:"stdout,omitempty"`
+	Stderr              string              `json:"stderr,omitempty"`
+	ExitCode            *int                `json:"exitCode,omitempty"`
+	TimedOut            bool                `json:"timedOut,omitempty"`
 }
 
 type TreeEntry struct {
@@ -249,6 +257,9 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 	if action.Operation != "copy" && action.Operation != "move" && (action.Source != "" || action.Destination != "") {
 		return fmt.Errorf("actions[%d] contains source or destination fields that are only supported for copy or move", index)
 	}
+	if action.Operation != "bash" && (action.Command != "" || action.TimeoutSeconds != 0) {
+		return fmt.Errorf("actions[%d] contains command fields that are only supported for bash", index)
+	}
 
 	switch action.Operation {
 	case "search":
@@ -368,6 +379,16 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for delete", index)
 		}
+	case "bash":
+		if strings.TrimSpace(action.Command) == "" {
+			return fmt.Errorf("actions[%d].command is required for bash", index)
+		}
+		if action.TimeoutSeconds < 0 || action.TimeoutSeconds > maximumBashTimeoutSeconds {
+			return fmt.Errorf("actions[%d].timeoutSeconds must be between 1 and %d for bash", index, maximumBashTimeoutSeconds)
+		}
+		if action.Query != "" || len(action.Paths) != 0 || action.Path != "" || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for bash", index)
+		}
 	default:
 		return fmt.Errorf("actions[%d].operation %q is not supported", index, action.Operation)
 	}
@@ -388,7 +409,7 @@ type batchEditState struct {
 	CurrentSHA256  string
 }
 
-func ExecuteRequest(workspace string, request Request) string {
+func ExecuteRequest(workspace string, request Request, progress io.Writer) string {
 	response := Response{
 		Version: protocolVersion,
 		Status:  "success",
@@ -422,8 +443,14 @@ func ExecuteRequest(workspace string, request Request) string {
 			}
 		}
 
-		result, responseError := executeAction(workspace, action, actionIndex)
+		result, responseError := executeAction(workspace, action, actionIndex, progress)
 		if responseError != nil {
+			if action.Operation == "bash" {
+				errorResponse := response
+				errorResponse.Status = "error"
+				errorResponse.Error = responseError
+				result, _ = fitReadOnlyResult(errorResponse, result, maxTransferChars)
+			}
 			return finishActionError(response, result, responseError, action, actionIndex, maxTransferChars)
 		}
 		if action.Operation == "edit" && result.Data != nil {
@@ -452,7 +479,7 @@ func ExecuteRequest(workspace string, request Request) string {
 	return marshalResponse(response)
 }
 
-func executeAction(workspace string, action Action, actionIndex int) (ActionResult, *ResponseError) {
+func executeAction(workspace string, action Action, actionIndex int, progress io.Writer) (ActionResult, *ResponseError) {
 	result := ActionResult{
 		ID:        action.ID,
 		Operation: action.Operation,
@@ -542,6 +569,8 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 		}
 	case "inspect":
 		result.Data, responseError = executeInspectAction(workspace, action, actionIndex)
+	case "bash":
+		result.Data, responseError = executeBashAction(workspace, action, actionIndex, progress)
 	case "mkdir":
 		var relativePath string
 		relativePath, responseError = executeMkdirAction(workspace, action, actionIndex)

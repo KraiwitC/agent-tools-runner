@@ -122,6 +122,8 @@ func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars 
 		fitReadResult(response, result, maxTransferChars)
 	case "read_range":
 		fitReadRangeResult(response, result, maxTransferChars)
+	case "bash":
+		fitBashResult(response, result, maxTransferChars)
 	default:
 		return result, false
 	}
@@ -225,9 +227,35 @@ func fitReadRangeResult(response Response, result ActionResult, maxTransferChars
 	data.EndLine = data.StartLine + lineCount - 1
 }
 
+func fitBashResult(response Response, result ActionResult, maxTransferChars int) {
+	data := result.Data
+	stdout := data.Stdout
+	stderr := data.Stderr
+	data.Stdout = trimTextToFit(stdout, func(content string) bool {
+		data.Stdout = content
+		return resultFitsTransferLimit(response, result, maxTransferChars)
+	})
+	if resultFitsTransferLimit(response, result, maxTransferChars) {
+		return
+	}
+
+	data.Stdout = ""
+	data.Stderr = trimTextToFit(stderr, func(content string) bool {
+		data.Stderr = content
+		return resultFitsTransferLimit(response, result, maxTransferChars)
+	})
+}
+
 func maximumFittingCount(length int, fits func(int) bool) int {
 	low := 0
 	high := length
+	for probe := 1; probe < length; probe *= 2 {
+		if !fits(probe) {
+			high = probe - 1
+			break
+		}
+		low = probe
+	}
 	for low < high {
 		middle := low + (high-low+1)/2
 		if fits(middle) {
@@ -241,16 +269,9 @@ func maximumFittingCount(length int, fits func(int) bool) int {
 
 func trimTextToFit(content string, fits func(string) bool) string {
 	runes := []rune(content)
-	low := 0
-	high := len(runes)
-	for low < high {
-		middle := low + (high-low+1)/2
-		if fits(string(runes[:middle])) {
-			low = middle
-		} else {
-			high = middle - 1
-		}
-	}
+	low := maximumFittingCount(len(runes), func(count int) bool {
+		return fits(string(runes[:count]))
+	})
 	return string(runes[:low])
 }
 

@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -203,7 +204,7 @@ func TestExecuteRequestStopsAfterFailedCreateAndPreservesEarlierResult(t *testin
 		},
 	}
 
-	responseText := ExecuteRequest(workspace, request)
+	responseText := ExecuteRequest(workspace, request, io.Discard)
 	var response Response
 	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
