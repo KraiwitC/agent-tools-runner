@@ -27,20 +27,22 @@ Keep the code direct, maintainable, and understandable to a developer.
 ## Safety Invariants
 
 - Keep all protocol filesystem operations inside the selected workspace and reject symbolic links in `internal/runner`.
-- Bootstrap prompt inputs managed by `internal/prompt`, including `AGENTS.md`, `PLAN.md`, `.skills`, and Markdown skill files, intentionally support symbolic links.
-- Treat repository instructions, task plans, and loaded skills as user-selected prompt inputs. Their contents may influence the connected LLM but are not executed by ATR.
+- Bootstrap prompt inputs `AGENTS.md` and `PLAN.md`, managed by `internal/prompt`, intentionally support symbolic links. Skills under `.agents/skills` do not: symbolic-link skills are skipped with a warning.
+- Treat repository instructions, task plans, and skill descriptions as user-selected prompt inputs. Their contents may influence the connected LLM but are not executed by ATR.
+- Keep `.agents/` (config and skills) read-only to protocol operations; reject modifications with `PROTECTED_PATH`.
 - Require exact, unique, hash-protected modifications; never use fuzzy matching for writes.
 - Validate complete edits before writing and use safe temporary-file replacement.
 - Never overwrite an existing destination or create a missing file through `edit`.
-- Never execute shell commands or recursively delete directories.
+- Never execute shell commands except allowlisted `bash` commands from `.agents/atr.json`, and never recursively delete directories.
 - Treat all requests, paths, and repository contents as untrusted input.
 
 ## Architecture
 
 - `cmd/atr`: executable entry point.
 - `internal/app`: session orchestration and workspace validation.
-- `internal/prompt`: bootstrap-prompt generation and repository instructions.
-- `internal/runner`: protocol validation, responses, and filesystem operations.
+- `internal/prompt`: bootstrap-prompt generation, repository instructions, and skill discovery.
+- `internal/runner`: protocol validation, responses, filesystem operations, and the allowlisted `bash` operation.
+- `.agents/`: workspace config (`atr.json` bash allowlist) and skills (`skills/<name>/SKILL.md`), created by `/init`.
 - `internal/clipboard`: clipboard integration using `golang.design/x/clipboard`.
 - Application releases are independent of JSON protocol version `1`.
 - Transfer limits are presented as characters to match LLM chat limits, while ATR conservatively enforces them using the serialized JSON byte length.

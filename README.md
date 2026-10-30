@@ -21,7 +21,8 @@ Run ATR from the project directory you want it to access, or select another dire
 - File operations are limited to files of at most 10 MiB.
 - Existing destinations are not overwritten by create, copy, or move operations.
 - Directory deletion is limited to empty directories.
-- ATR does not execute shell commands.
+- `bash` runs only allowlisted commands from `.agents/atr.json` through the host shell with a capped timeout; every other operation remains workspace-confined.
+- The `.agents` folder is read-only to protocol operations.
 
 ## Supported operations
 
@@ -37,6 +38,25 @@ Run ATR from the project directory you want it to access, or select another dire
 - `move`: Move or rename a hash-matched UTF-8 text file without overwriting the destination.
 - `mkdir`: Create one directory whose parent already exists.
 - `delete`: Delete a hash-matched file or an empty directory.
+- `bash`: Run an allowlisted command in the workspace (PowerShell on Windows, bash elsewhere). Disabled until commands are allowed in `.agents/atr.json`.
+
+## Workspace configuration
+
+Run `/init` in ATR to create the `.agents` folder without overwriting existing files. The new `atr.json` allows `git diff` and `git status`:
+
+```text
+.agents/
+  atr.json
+  skills/
+    <skill-name>/
+      SKILL.md
+```
+
+`atr.json` controls which `bash` commands are allowed. A command is allowed when it starts with one of the entries.
+
+Run `/prompt` after editing the file and start a new conversation with the refreshed prompt.
+
+Skills are discovered automatically. The bootstrap prompt lists each `.agents/skills/<name>/SKILL.md` with the `description` from its frontmatter, and the LLM reads the relevant `SKILL.md` through ATR.
 
 ## Download dependencies
 
