@@ -14,7 +14,7 @@ import (
 
 const (
 	applicationName    = "Agent Tools Runner"
-	applicationVersion = "v1.0.0"
+	applicationVersion = "v1.1.0"
 )
 
 type options struct {
@@ -39,7 +39,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	bootstrapPrompt, agentsFileFound, skillNames, err := prompt.Create(workspace)
+	bootstrapPrompt, agentsFileFound, skillNames, err := app.CreateBootstrapPrompt(workspace)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create bootstrap prompt: %v\n", err)
 		os.Exit(1)

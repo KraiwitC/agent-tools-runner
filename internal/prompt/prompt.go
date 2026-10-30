@@ -1,17 +1,22 @@
 package prompt
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
 
 const AgentsFileName = "AGENTS.md"
 const PlanFileName = "PLAN.md"
-const SkillsDirectoryName = ".skills"
-const bootstrapInstructions = `# Agent Tools Runner Instructions
+const AgentsDirectoryName = ".agents"
+const SkillsDirectoryName = "skills"
+const SkillFileName = "SKILL.md"
+const bootstrapInstructionsStart = `# Agent Tools Runner Instructions
 
 ## Identity and Protocol
 
@@ -40,6 +45,7 @@ Return exactly one fenced json code block containing one strict JSON object:
 Rules:
 - Use ASCII double quotes, no comments, no trailing commas, and unique action IDs.
 - A request may contain at most 100 actions. An edit may contain at most 100 replacements.
+- Do not create a file and then edit it in the same request. Put the final content in one create.
 - Examples in this prompt are standalone documentation actions, not executable requests.
 
 ATR tolerates an optional opening JSON fence and up to three accidental trailing backticks or tildes. Do not rely on this: still return clean JSON.
@@ -63,6 +69,8 @@ Before returning any request, verify:
 4. The fenced block contains exactly one complete strict JSON object.
 
 Do not HTML-encode or decode text from ATR results. Preserve all text exactly as returned. If ATR reports INVALID_REQUEST, regenerate the complete request rather than asking the user to repair it.
+
+Chat interfaces may display URLs as <a href=...> tags that are not present in the actual file. Never copy such tags into oldText.
 
 ## Operations Reference
 
@@ -112,6 +120,24 @@ Example: {"id":"mk1","operation":"mkdir","path":"internal/generated"}
 delete: Delete a file (requires expectedSha256) or an empty directory (omit expectedSha256). Only delete after user approval. Never request recursive deletion.
 Example: {"id":"d1","operation":"delete","path":"obsolete.txt","expectedSha256":"0000000000000000000000000000000000000000000000000000000000000000"}
 
+`
+
+const bashEnabledInstructions = `### Execution Operations
+
+bash: Run an allowlisted command in the workspace. Commands run in PowerShell on Windows and in bash elsewhere. Each action starts a fresh process, so no shell state such as cd or variables persists between actions. timeoutSeconds is optional. A non-zero exitCode is returned as data, not as an ATR error. stdout and stderr may be trimmed to fit the transfer limit. Pipes, redirects, chaining, and substitution are not supported: ATR rejects shell control characters even inside quotes.
+Example: {"id":"b1","operation":"bash","command":"go test ./...","timeoutSeconds":20}
+
+Use bash only when no structured operation can do the job. If a command may run long, ask the user to run it manually. If a needed command is not allowed, suggest the user add it to bash.allow in .agents/atr.json and run /prompt. The .agents folder is read-only.
+
+Allowed bash commands (a command is allowed when it starts with one of these entries):
+`
+
+const bashDisabledInstructions = `### Execution Operations
+
+bash is disabled because no commands are allowed. Do not return bash actions. If a command is needed, suggest the user add it to bash.allow in .agents/atr.json (run /init first if the folder does not exist) and run /prompt. The .agents folder is read-only: do not attempt to modify anything under it.
+`
+
+const bootstrapInstructionsEnd = `
 ### Hash Tracking
 
 Always use the SHA-256 hash from the most recent ATR result for that file. After a successful edit, create, copy, or move, store the returned hash for subsequent operations on the same file.
@@ -134,6 +160,10 @@ When ATR returns an error, preserve results from earlier successful actions and 
 - RANGE_OUT_OF_BOUNDS: Use totalLines from the response to pick a valid range.
 - DIRECTORY_NOT_EMPTY: Do not delete recursively. Inspect and revise.
 - DELETE_FAILED / WRITE_FAILED: Report the failure honestly. Do not claim success.
+- BASH_NOT_ALLOWED: Do not retry variants of the command. Suggest the user add it to the allowlist or run it manually.
+- BASH_FAILED: Report the failure honestly. Do not claim success.
+- BASH_TIMEOUT: Ask the user to run the command manually and report back.
+- PROTECTED_PATH: Do not bypass. Ask the user to make the change.
 
 ## Repository Instructions
 
@@ -143,21 +173,25 @@ When a task is complete, suggest one minimal Conventional Commit message with an
 
 `
 
-func Create(workspace string) (string, bool, []string, error) {
+func Create(workspace string, bashAllow []string) (string, bool, []string, []string, error) {
 	repositoryInstructions, agentsFileFound, err := readRepositoryInstructions(workspace)
 	if err != nil {
-		return "", false, nil, err
+		return "", false, nil, nil, err
 	}
 	taskPlan, planFileFound, err := readTaskPlan(workspace)
 	if err != nil {
-		return "", false, nil, err
+		return "", false, nil, nil, err
 	}
-	skills, skillNames, err := readSkills(workspace)
+	skills, warnings, err := readSkills(workspace)
 	if err != nil {
-		return "", false, nil, err
+		return "", false, nil, nil, err
 	}
-	prompt := buildBootstrapPrompt(repositoryInstructions, agentsFileFound, taskPlan, planFileFound, skills)
-	return prompt, agentsFileFound, skillNames, nil
+	prompt := buildBootstrapPrompt(repositoryInstructions, agentsFileFound, taskPlan, planFileFound, skills, bashAllow)
+	skillNames := make([]string, 0, len(skills))
+	for _, availableSkill := range skills {
+		skillNames = append(skillNames, availableSkill.name)
+	}
+	return prompt, agentsFileFound, skillNames, warnings, nil
 }
 
 func readRepositoryInstructions(workspace string) (string, bool, error) {
@@ -184,37 +218,119 @@ func readTaskPlan(workspace string) (string, bool, error) {
 	return string(content), true, nil
 }
 
-func readSkills(workspace string) (string, []string, error) {
-	entries, err := os.ReadDir(filepath.Join(workspace, SkillsDirectoryName))
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil, nil
-	}
-	if err != nil {
-		return "", nil, fmt.Errorf("read %s: %w", SkillsDirectoryName, err)
-	}
-
-	var skills strings.Builder
-	var names []string
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".md") {
-			continue
-		}
-		content, err := os.ReadFile(filepath.Join(workspace, SkillsDirectoryName, entry.Name()))
-		if err != nil {
-			return "", nil, fmt.Errorf("read skill %s: %w", entry.Name(), err)
-		}
-		names = append(names, entry.Name())
-		fmt.Fprintf(&skills, "\n### %s\n\n%s", entry.Name(), content)
-		if !strings.HasSuffix(string(content), "\n") {
-			skills.WriteString("\n")
-		}
-	}
-	return skills.String(), names, nil
+type skill struct {
+	name        string
+	description string
+	path        string
 }
 
-func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, taskPlan string, planFileFound bool, skills string) string {
+func readSkills(workspace string) ([]skill, []string, error) {
+	skillsDisplayPath := path.Join(AgentsDirectoryName, SkillsDirectoryName)
+	for _, directory := range []string{AgentsDirectoryName, skillsDisplayPath} {
+		info, err := os.Lstat(filepath.Join(workspace, filepath.FromSlash(directory)))
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, nil
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("inspect %s: %w", directory, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, []string{fmt.Sprintf("Skipped skills: %s is a symbolic link.", directory)}, nil
+		}
+		if !info.IsDir() {
+			return nil, nil, nil
+		}
+	}
+
+	skillsDirectory := filepath.Join(workspace, filepath.FromSlash(skillsDisplayPath))
+	entries, err := os.ReadDir(skillsDirectory)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", skillsDisplayPath, err)
+	}
+
+	var skills []skill
+	var warnings []string
+	for _, entry := range entries {
+		skillPath := path.Join(skillsDisplayPath, entry.Name(), SkillFileName)
+		skillFilePath := filepath.Join(skillsDirectory, entry.Name(), SkillFileName)
+		if entry.Type()&os.ModeSymlink != 0 {
+			warnings = append(warnings, fmt.Sprintf("Skipped skill %s: symbolic links are not supported.", entry.Name()))
+			continue
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		info, err := os.Lstat(skillFilePath)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("inspect %s: %w", skillPath, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			warnings = append(warnings, fmt.Sprintf("Skipped skill %s: %s is a symbolic link.", entry.Name(), SkillFileName))
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		description, err := readSkillDescription(skillFilePath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("read skill %s: %w", entry.Name(), err)
+		}
+		skills = append(skills, skill{name: entry.Name(), description: description, path: skillPath})
+	}
+	return skills, warnings, nil
+}
+
+func readSkillDescription(skillPath string) (string, error) {
+	file, err := os.Open(skillPath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	return parseSkillDescription(file), nil
+}
+
+func parseSkillDescription(reader io.Reader) string {
+	scanner := bufio.NewScanner(reader)
+	if !scanner.Scan() || strings.TrimSpace(strings.TrimPrefix(scanner.Text(), "\ufeff")) != "---" {
+		return ""
+	}
+	description := ""
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "---" {
+			return description
+		}
+		value, found := strings.CutPrefix(line, "description:")
+		if !found {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if strings.HasPrefix(value, ">") || strings.HasPrefix(value, "|") {
+			continue
+		}
+		if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
+			value = value[1 : len(value)-1]
+		}
+		description = strings.Join(strings.Fields(value), " ")
+	}
+	return ""
+}
+
+func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, taskPlan string, planFileFound bool, skills []skill, bashAllow []string) string {
 	var prompt strings.Builder
-	prompt.WriteString(bootstrapInstructions)
+	prompt.WriteString(bootstrapInstructionsStart)
+	if len(bashAllow) != 0 {
+		prompt.WriteString(bashEnabledInstructions)
+		for _, entry := range bashAllow {
+			prompt.WriteString("- " + entry + "\n")
+		}
+	} else {
+		prompt.WriteString(bashDisabledInstructions)
+	}
+	prompt.WriteString(bootstrapInstructionsEnd)
 	if agentsFileFound {
 		prompt.WriteString("## Project Guidelines (" + AgentsFileName + ")\n\n")
 		prompt.WriteString(repositoryInstructions)
@@ -231,9 +347,16 @@ func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, t
 			prompt.WriteString("\n")
 		}
 	}
-	if skills != "" {
-		prompt.WriteString("\n## Loaded Skills\n")
-		prompt.WriteString(skills)
+	if len(skills) != 0 {
+		prompt.WriteString("\n## Available Skills\n\n")
+		for _, availableSkill := range skills {
+			prompt.WriteString("- " + availableSkill.name)
+			if availableSkill.description != "" {
+				prompt.WriteString(": " + availableSkill.description)
+			}
+			prompt.WriteString(" (" + availableSkill.path + ")\n")
+		}
+		prompt.WriteString("\nBefore starting a task, read the " + SkillFileName + " of any skill relevant to it.\n")
 	}
 	prompt.WriteString("\n# User Instructions\n\n")
 	return prompt.String()
