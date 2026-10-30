@@ -460,6 +460,11 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 	}
 	var responseError *ResponseError
 
+	if responseError = protectedPathError(workspace, action, actionIndex); responseError != nil {
+		result.Status = "error"
+		return result, responseError
+	}
+
 	switch action.Operation {
 	case "search":
 		var matches []SearchMatch
