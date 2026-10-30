@@ -52,5 +52,5 @@ local.yaml
 local.yml
 config.local.*
 
-# Skills
-.skills/
+# Agents
+.agents/
