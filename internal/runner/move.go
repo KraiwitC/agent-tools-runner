@@ -7,7 +7,7 @@ import (
 )
 
 func executeMoveAction(workspace string, action Action, actionIndex int) (int, string, string, *ResponseError) {
-	resolvedSource, sourcePath, _, err := resolveWorkspaceFile(workspace, action.Source)
+	resolvedSource, sourcePath, sourceInfo, err := resolveWorkspaceFile(workspace, action.Source)
 	if err != nil {
 		return 0, filepath.ToSlash(filepath.Clean(action.Destination)), "", workspaceResponseError(action, actionIndex, err, "READ_FAILED", "Could not prepare the requested file move.", sourcePath)
 	}
@@ -33,7 +33,7 @@ func executeMoveAction(workspace string, action Action, actionIndex int) (int, s
 		return 0, destinationPath, "", workspaceResponseError(action, actionIndex, err, "WRITE_FAILED", "Could not prepare the move destination.", destinationPath)
 	}
 
-	bytesWritten, err := createFileSafely(resolvedDestination, content)
+	bytesWritten, err := createFileSafely(resolvedDestination, content, sourceInfo.Mode().Perm())
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return 0, destinationPath, "", &ResponseError{
