@@ -124,7 +124,7 @@ Example: {"id":"d1","operation":"delete","path":"obsolete.txt","expectedSha256":
 
 const bashEnabledInstructions = `### Execution Operations
 
-bash: Run an allowlisted command in the workspace. Commands run in PowerShell on Windows and in bash elsewhere. Each action starts a fresh process, so no shell state such as cd or variables persists between actions. timeoutSeconds is optional. A non-zero exitCode is returned as data, not as an ATR error. stdout and stderr may be trimmed to fit the transfer limit. Pipes, redirects, chaining, and substitution are not supported: ATR rejects shell control characters even inside quotes.
+bash: Run an allowlisted command in the workspace. Commands run in PowerShell on Windows and in bash elsewhere. Each action starts a fresh process, so no shell state such as cd or variables persists between actions. timeoutSeconds is optional. A non-zero exitCode is returned as data, not as an ATR error. stdout and stderr may be trimmed to fit the transfer limit. Pipes, redirects, chaining, and substitution are not supported: ATR rejects shell control characters, including $, even inside quotes. The --output and --no-index arguments are also rejected.
 Example: {"id":"b1","operation":"bash","command":"go test ./...","timeoutSeconds":20}
 
 Use bash only when no structured operation can do the job. If a command may run long, ask the user to run it manually. If a needed command is not allowed, suggest the user add it to bash.allow in .agents/atr.json and run /prompt. The .agents and .git folders are read-only.

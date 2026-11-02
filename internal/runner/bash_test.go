@@ -122,6 +122,18 @@ func TestExecuteRequestReturnsNonZeroExitCodeAsData(t *testing.T) {
 	}
 }
 
+func TestExecuteBashActionKeepsExitCodeAfterComment(t *testing.T) {
+	workspace, command := newBashHelperWorkspace(t, "exit")
+
+	data, responseError := executeBashAction(workspace, Action{ID: "b1", Operation: "bash", Command: command + " # comment"}, 0, io.Discard)
+	if responseError != nil {
+		t.Fatalf("executeBashAction returned an error: %#v", responseError)
+	}
+	if data.ExitCode == nil || *data.ExitCode != 3 {
+		t.Fatalf("exit code = %s, want 3", describeExitCode(data.ExitCode))
+	}
+}
+
 func describeExitCode(exitCode *int) string {
 	if exitCode == nil {
 		return "<nil>"
@@ -194,6 +206,7 @@ func TestExecuteBashActionRejectsShellControlCharacters(t *testing.T) {
 		"go version `go env`",
 		"go version $(go env)",
 		"go version ${GOOS}",
+		"go version $GOOS",
 		"go version (go env)",
 		"go version {go env}",
 		"go version\ngo env",
@@ -210,6 +223,36 @@ func TestExecuteBashActionRejectsShellControlCharacters(t *testing.T) {
 			assertResponseErrorCode(t, responseError, "BASH_NOT_ALLOWED")
 			assertPathDoesNotExist(t, filepath.Join(workspace, "output.txt"))
 		})
+	}
+}
+
+func TestExecuteBashActionRejectsFileAccessArguments(t *testing.T) {
+	commands := []string{
+		"git diff --output=../escaped.txt",
+		"git diff --output ../escaped.txt",
+		"git log -p --output=.git/config",
+		`git show "--output=../escaped.txt"`,
+		`git diff --out"pu"t=../escaped.txt`,
+		`git diff --out\put=../escaped.txt`,
+		"git diff --no-index ../outside.txt inside.txt",
+	}
+
+	for _, command := range commands {
+		t.Run(command, func(t *testing.T) {
+			workspace := t.TempDir()
+			writeBashConfig(t, workspace, []string{"git diff", "git log", "git show"})
+
+			_, responseError := executeBashAction(workspace, Action{ID: "b1", Operation: "bash", Command: command}, 0, io.Discard)
+			assertResponseErrorCode(t, responseError, "BASH_NOT_ALLOWED")
+		})
+	}
+}
+
+func TestHasForbiddenBashArgumentAllowsSimilarArguments(t *testing.T) {
+	for _, command := range []string{"git diff --stat", "tool --output-file=report.txt", "git log --oneline"} {
+		if hasForbiddenBashArgument(command) {
+			t.Fatalf("hasForbiddenBashArgument(%q) = true, want false", command)
+		}
 	}
 }
 

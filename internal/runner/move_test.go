@@ -3,6 +3,7 @@ package runner
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -34,6 +35,39 @@ func TestExecuteMoveActionMovesFile(t *testing.T) {
 	}
 	assertPathDoesNotExist(t, sourcePath)
 	assertFileContent(t, filepath.Join(workspace, "destination.txt"), content)
+}
+
+func TestExecuteMoveActionPreservesSourcePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not expose Unix permission bits consistently")
+	}
+
+	workspace := t.TempDir()
+	content := "move me"
+	sourcePath := writeTestFile(t, workspace, "source.txt", content)
+	if err := os.Chmod(sourcePath, 0o640); err != nil {
+		t.Fatalf("set test permissions: %v", err)
+	}
+	action := Action{
+		ID:             "move-file",
+		Operation:      "move",
+		Source:         "source.txt",
+		Destination:    "destination.txt",
+		ExpectedSHA256: calculateSHA256([]byte(content)),
+	}
+
+	_, _, _, responseError := executeMoveAction(workspace, action, 0)
+	if responseError != nil {
+		t.Fatalf("executeMoveAction returned an error: %#v", responseError)
+	}
+
+	fileInfo, err := os.Stat(filepath.Join(workspace, "destination.txt"))
+	if err != nil {
+		t.Fatalf("inspect moved file: %v", err)
+	}
+	if fileInfo.Mode().Perm() != 0o640 {
+		t.Fatalf("expected permissions 0640, got %04o", fileInfo.Mode().Perm())
+	}
 }
 
 func TestExecuteMoveActionRejectsChangedSource(t *testing.T) {

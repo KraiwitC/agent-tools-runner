@@ -17,7 +17,9 @@ import (
 const maximumBashCaptureBytes = int(maximumFileSize)
 const bashWaitDelay = 2 * time.Second
 
-const bashForbiddenCharacters = ";&|<>`(){}\r\n"
+const bashForbiddenCharacters = ";&|<>`(){}$\r\n"
+
+var bashForbiddenArguments = []string{"--output", "--no-index"}
 
 func executeBashAction(workspace string, action Action, actionIndex int, progress io.Writer) (*ActionData, *ResponseError) {
 	config, found, err := LoadConfig(workspace)
@@ -28,7 +30,10 @@ func executeBashAction(workspace string, action Action, actionIndex int, progres
 		return nil, newActionResponseError(action, actionIndex, "BASH_NOT_ALLOWED", "bash is disabled because "+ConfigDisplayPath+" does not exist. Ask the user to run /init and add allowed commands.", "")
 	}
 	if strings.ContainsAny(action.Command, bashForbiddenCharacters) {
-		return nil, newActionResponseError(action, actionIndex, "BASH_NOT_ALLOWED", "The command contains shell control characters (; & | < > ` ( ) { } or a line break), which are not allowed.", "")
+		return nil, newActionResponseError(action, actionIndex, "BASH_NOT_ALLOWED", "The command contains shell control characters (; & | < > ` ( ) { } $ or a line break), which are not allowed.", "")
+	}
+	if hasForbiddenBashArgument(action.Command) {
+		return nil, newActionResponseError(action, actionIndex, "BASH_NOT_ALLOWED", "The --output and --no-index arguments are not allowed because they access files outside the workspace.", "")
 	}
 	if !isBashCommandAllowed(action.Command, config.Bash.Allow) {
 		return nil, newActionResponseError(action, actionIndex, "BASH_NOT_ALLOWED", "The command is not on the bash allowlist. Ask the user to add it to bash.allow in "+ConfigDisplayPath+" or to run it manually.", "")
@@ -87,9 +92,21 @@ func isBashCommandAllowed(command string, allow []string) bool {
 	return false
 }
 
+func hasForbiddenBashArgument(command string) bool {
+	unquotedCommand := strings.NewReplacer(`"`, "", `'`, "", `\`, "").Replace(command)
+	for _, word := range strings.Fields(unquotedCommand) {
+		for _, forbidden := range bashForbiddenArguments {
+			if word == forbidden || strings.HasPrefix(word, forbidden+"=") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func bashShellCommand(command string) (string, []string) {
 	if runtime.GOOS == "windows" {
-		script := command + "; $atrSucceeded = $?; if ($LASTEXITCODE) { exit $LASTEXITCODE }; if (-not $atrSucceeded) { exit 1 }"
+		script := command + "\n$atrSucceeded = $?; if ($LASTEXITCODE) { exit $LASTEXITCODE }; if (-not $atrSucceeded) { exit 1 }"
 		return "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-Command", script}
 	}
 	if bashPath, err := exec.LookPath("bash"); err == nil {

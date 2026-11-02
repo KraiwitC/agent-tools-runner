@@ -497,7 +497,7 @@ func CreateBootstrapPrompt(workspace string) (string, bool, []string, error) {
 
 const initialConfigContent = `{
   "bash": {
-    "allow": ["git diff", "git status"]
+    "allow": ["git status", "git diff", "git log", "git show"]
   }
 }
 `

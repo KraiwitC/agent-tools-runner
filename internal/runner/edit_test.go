@@ -128,6 +128,27 @@ func TestExecuteEditActionRejectsUnsupportedResultWithoutChangingFile(t *testing
 	assertNoTemporaryEditFiles(t, workspace)
 }
 
+func TestExecuteEditActionRejectsOversizedResultWithoutChangingFile(t *testing.T) {
+	workspace := t.TempDir()
+	original := strings.Repeat("a", int(maximumFileSize)-1) + "x"
+	path := writeTestFile(t, workspace, "edit.txt", original)
+
+	action := Action{
+		ID:             "edit-file",
+		Operation:      "edit",
+		Path:           "edit.txt",
+		ExpectedSHA256: calculateSHA256([]byte(original)),
+		Replacements: []Replacement{
+			{OldText: "x", NewText: "xy"},
+		},
+	}
+
+	_, _, responseError := executeEditAction(workspace, action, 0)
+	assertResponseErrorCode(t, responseError, "FILE_TOO_LARGE")
+	assertFileContent(t, path, original)
+	assertNoTemporaryEditFiles(t, workspace)
+}
+
 func TestExecuteEditActionRejectsNonUniqueTargetWithoutChangingFile(t *testing.T) {
 	workspace := t.TempDir()
 	original := "same and same"
