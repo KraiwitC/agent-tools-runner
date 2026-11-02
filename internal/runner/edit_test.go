@@ -107,6 +107,27 @@ func TestExecuteEditActionRejectsMissingTargetWithoutChangingFile(t *testing.T) 
 	assertNoTemporaryEditFiles(t, workspace)
 }
 
+func TestExecuteEditActionRejectsUnsupportedResultWithoutChangingFile(t *testing.T) {
+	workspace := t.TempDir()
+	original := "original content"
+	path := writeTestFile(t, workspace, "edit.txt", original)
+
+	action := Action{
+		ID:             "edit-file",
+		Operation:      "edit",
+		Path:           "edit.txt",
+		ExpectedSHA256: calculateSHA256([]byte(original)),
+		Replacements: []Replacement{
+			{OldText: "content", NewText: "bad\x00content"},
+		},
+	}
+
+	_, _, responseError := executeEditAction(workspace, action, 0)
+	assertResponseErrorCode(t, responseError, "UNSUPPORTED_FILE")
+	assertFileContent(t, path, original)
+	assertNoTemporaryEditFiles(t, workspace)
+}
+
 func TestExecuteEditActionRejectsNonUniqueTargetWithoutChangingFile(t *testing.T) {
 	workspace := t.TempDir()
 	original := "same and same"

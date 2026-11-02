@@ -44,6 +44,24 @@ func executeEditAction(workspace string, action Action, actionIndex int) (int, s
 	}
 
 	updatedContent := applyPreparedReplacements(content, preparedReplacements)
+	if int64(len(updatedContent)) > maximumFileSize {
+		return 0, "", &ResponseError{
+			ActionID:    action.ID,
+			ActionIndex: actionIndex,
+			Code:        "FILE_TOO_LARGE",
+			Message:     "The edited file would exceed the 10 MiB file-size limit.",
+			Path:        relativePath,
+		}
+	}
+	if !isSupportedText([]byte(updatedContent)) {
+		return 0, "", &ResponseError{
+			ActionID:    action.ID,
+			ActionIndex: actionIndex,
+			Code:        "UNSUPPORTED_FILE",
+			Message:     "The edited content must be valid UTF-8 text without null bytes.",
+			Path:        relativePath,
+		}
+	}
 	if err := replaceFile(resolvedPath, updatedContent, fileInfo.Mode().Perm(), action.ExpectedSHA256); err != nil {
 		code := "WRITE_FAILED"
 		message := "Could not safely write the edited file."
