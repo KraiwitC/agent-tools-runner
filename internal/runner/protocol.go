@@ -349,9 +349,6 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 			return fmt.Errorf("actions[%d] contains fields that are not supported for %s", index, action.Operation)
 		}
 	case "tree":
-		if strings.TrimSpace(action.Path) == "" {
-			return fmt.Errorf("actions[%d].path is required for tree", index)
-		}
 		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for tree", index)
 		}

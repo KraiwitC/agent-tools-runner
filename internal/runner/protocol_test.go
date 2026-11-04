@@ -589,7 +589,6 @@ func TestValidateRequestRejectsMissingRequiredFields(t *testing.T) {
 		{name: "copy destination", action: Action{ID: "copy", Operation: "copy", Source: "source.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
 		{name: "move source", action: Action{ID: "move", Operation: "move", Destination: "destination.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
 		{name: "move destination", action: Action{ID: "move", Operation: "move", Source: "source.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
-		{name: "tree path", action: Action{ID: "tree", Operation: "tree"}},
 		{name: "inspect path", action: Action{ID: "inspect", Operation: "inspect"}},
 		{name: "mkdir path", action: Action{ID: "mkdir", Operation: "mkdir"}},
 		{name: "delete path", action: Action{ID: "delete", Operation: "delete"}},
