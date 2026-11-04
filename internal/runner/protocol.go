@@ -17,7 +17,7 @@ const maximumActions = 100
 const maximumEditReplacements = 100
 const maximumReadRangeLines = 1000
 const defaultBashTimeoutSeconds = 10
-const maximumBashTimeoutSeconds = 30
+const maximumBashTimeoutSeconds = 300
 const defaultMaximumTransferChars = 120000
 const sha256HexLength = 64
 
@@ -384,7 +384,7 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 			return fmt.Errorf("actions[%d].command is required for bash", index)
 		}
 		if action.TimeoutSeconds < 0 || action.TimeoutSeconds > maximumBashTimeoutSeconds {
-			return fmt.Errorf("actions[%d].timeoutSeconds must be between 1 and %d for bash", index, maximumBashTimeoutSeconds)
+			return fmt.Errorf("actions[%d].timeoutSeconds must be between 1 and %d when specified for bash", index, maximumBashTimeoutSeconds)
 		}
 		if action.Query != "" || len(action.Paths) != 0 || action.Path != "" || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for bash", index)

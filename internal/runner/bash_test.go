@@ -310,10 +310,10 @@ func TestValidateBashAction(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "valid", request: `{"version":"1","actions":[{"id":"b1","operation":"bash","command":"go test"}]}`},
-		{name: "valid with timeout", request: `{"version":"1","actions":[{"id":"b1","operation":"bash","command":"go test","timeoutSeconds":30}]}`},
+		{name: "valid with timeout", request: `{"version":"1","actions":[{"id":"b1","operation":"bash","command":"go test","timeoutSeconds":300}]}`},
 		{name: "missing command", request: `{"version":"1","actions":[{"id":"b1","operation":"bash"}]}`, wantErr: true},
 		{name: "blank command", request: `{"version":"1","actions":[{"id":"b1","operation":"bash","command":"   "}]}`, wantErr: true},
-		{name: "timeout too large", request: `{"version":"1","actions":[{"id":"b1","operation":"bash","command":"go test","timeoutSeconds":31}]}`, wantErr: true},
+		{name: "timeout too large", request: `{"version":"1","actions":[{"id":"b1","operation":"bash","command":"go test","timeoutSeconds":301}]}`, wantErr: true},
 		{name: "negative timeout", request: `{"version":"1","actions":[{"id":"b1","operation":"bash","command":"go test","timeoutSeconds":-1}]}`, wantErr: true},
 		{name: "unsupported field", request: `{"version":"1","actions":[{"id":"b1","operation":"bash","command":"go test","path":"x"}]}`, wantErr: true},
 		{name: "command on another operation", request: `{"version":"1","actions":[{"id":"r1","operation":"read","paths":["a.go"],"command":"go test"}]}`, wantErr: true},
