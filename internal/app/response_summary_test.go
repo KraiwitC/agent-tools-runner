@@ -131,7 +131,7 @@ func TestSummarizeResponseFormatsBashCommands(t *testing.T) {
 	expected := "\nSUCCESS\n\n" +
 		"  BASH      go fmt ./...\n" +
 		"  BASH      go test ./internal/app\n" +
-		"  BASH      git diff -- internal/app/response_summary.go internal/app/res..."
+		"  BASH      git diff -- internal/app/response_summary.go ..."
 	if summary != expected {
 		t.Fatalf("unexpected summary:\n%s\n\nexpected:\n%s", summary, expected)
 	}
