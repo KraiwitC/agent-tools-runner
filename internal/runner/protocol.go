@@ -83,6 +83,7 @@ type ActionData struct {
 	Empty               *bool               `json:"empty,omitempty"`
 	ReplacementsApplied int                 `json:"replacementsApplied,omitempty"`
 	BytesWritten        int                 `json:"bytesWritten,omitempty"`
+	Command             string              `json:"command,omitempty"`
 	Stdout              string              `json:"stdout,omitempty"`
 	Stderr              string              `json:"stderr,omitempty"`
 	ExitCode            *int                `json:"exitCode,omitempty"`
@@ -491,6 +492,7 @@ func executeAction(workspace string, action Action, actionIndex int, progress io
 
 	switch action.Operation {
 	case "search":
+		_, _ = fmt.Fprintf(progress, "[SEARCH] → %q\n", printableCommand(action.Query))
 		var matches []SearchMatch
 		var truncated bool
 		matches, truncated, responseError = executeSearchAction(workspace, action, actionIndex)
@@ -500,6 +502,7 @@ func executeAction(workspace string, action Action, actionIndex int, progress io
 			Truncated: truncated,
 		}
 	case "ranked_search":
+		_, _ = fmt.Fprintf(progress, "[SEARCH] → %q\n", printableCommand(action.Query))
 		var matches []RankedSearchMatch
 		var truncated bool
 		matches, truncated, responseError = executeRankedSearchAction(workspace, action, actionIndex)

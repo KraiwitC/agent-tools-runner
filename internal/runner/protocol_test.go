@@ -120,6 +120,28 @@ func TestParseAndValidateRequestRejectsDuplicateActionIDs(t *testing.T) {
 	}
 }
 
+func TestExecuteActionPrintsSearchProgress(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "example.txt", "executeSearchAction\n")
+	var progress strings.Builder
+
+	actions := []Action{
+		{ID: "search", Operation: "search", Query: "executeSearchAction"},
+		{ID: "ranked-search", Operation: "ranked_search", Query: "execute search action"},
+	}
+	for actionIndex, action := range actions {
+		_, responseError := executeAction(workspace, action, actionIndex, &progress)
+		if responseError != nil {
+			t.Fatalf("executeAction returned an error for %s: %#v", action.Operation, responseError)
+		}
+	}
+
+	expected := "[SEARCH] → \"executeSearchAction\"\n[SEARCH] → \"execute search action\"\n"
+	if progress.String() != expected {
+		t.Fatalf("progress = %q, want %q", progress.String(), expected)
+	}
+}
+
 func TestExecuteRequestPreservesResultWithinTransferLimit(t *testing.T) {
 	workspace := t.TempDir()
 	writeTestFile(t, workspace, "small.txt", "content")

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"agent-tools-runner/internal/runner"
 )
@@ -97,6 +98,8 @@ func summarizeActionResult(result runner.ActionResult) string {
 			return data.Path
 		}
 		return fmt.Sprintf("%s (%s)", data.Path, data.Type)
+	case "bash":
+		return truncateSummaryText(data.Command, 48)
 	default:
 		if data.Path != "" {
 			return data.Path
@@ -120,6 +123,13 @@ func summarizeInspectResult(data *runner.ActionData) string {
 		return fmt.Sprintf("%s (%s)", data.Path, data.Type)
 	}
 	return data.Path
+}
+
+func truncateSummaryText(text string, maximumCharacters int) string {
+	if utf8.RuneCountInString(text) <= maximumCharacters {
+		return text
+	}
+	return string([]rune(text)[:maximumCharacters-3]) + "..."
 }
 
 func appendTruncated(detail string, truncated bool) string {

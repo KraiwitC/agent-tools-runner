@@ -53,7 +53,7 @@ func executeBashAction(workspace string, action Action, actionIndex int, progres
 	configureBashProcess(command)
 
 	console := &consoleWriter{writer: progress}
-	console.writeLine("  → Running bash: " + printableCommand(action.Command))
+	console.writeLine("[BASH] → " + printableCommand(action.Command))
 	stdout := &limitedBuffer{limit: maximumBashCaptureBytes}
 	stderr := &limitedBuffer{limit: maximumBashCaptureBytes}
 	command.Stdout = io.MultiWriter(stdout, console)
@@ -62,7 +62,7 @@ func executeBashAction(workspace string, action Action, actionIndex int, progres
 	runError := command.Run()
 	console.finishLine()
 
-	data := &ActionData{Stdout: stdout.String(), Stderr: stderr.String()}
+	data := &ActionData{Command: action.Command, Stdout: stdout.String(), Stderr: stderr.String()}
 	if runError == nil {
 		exitCode := 0
 		data.ExitCode = &exitCode
@@ -70,7 +70,7 @@ func executeBashAction(workspace string, action Action, actionIndex int, progres
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		data.TimedOut = true
-		return data, newActionResponseError(action, actionIndex, "BASH_TIMEOUT", "The command exceeded its timeout and was stopped. Partial output is included.", "")
+		return data, newActionResponseError(action, actionIndex, "BASH_TIMEOUT", "The command exceeded its timeout and was stopped.", "")
 	}
 	var exitError *exec.ExitError
 	if errors.As(runError, &exitError) {

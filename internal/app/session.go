@@ -221,6 +221,12 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 					if err == nil {
 						lastClipboardRequest = trimmedText
 						fmt.Println()
+						for _, action := range request.Actions {
+							if action.Operation == "bash" || action.Operation == "search" || action.Operation == "ranked_search" {
+								fmt.Println()
+								break
+							}
+						}
 						responseText := runner.ExecuteRequest(workspace, request, os.Stdout)
 						lastResponse = responseText
 						presentResponse(responseText, clipboardReady)

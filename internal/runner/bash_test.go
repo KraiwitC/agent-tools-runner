@@ -78,7 +78,10 @@ func TestExecuteBashActionCapturesOutputAndStreamsProgress(t *testing.T) {
 		t.Fatalf("stdout = %q, stderr = %q", data.Stdout, data.Stderr)
 	}
 	progressText := progress.String()
-	for _, expected := range []string{"Running bash:", "out-text", "err-text"} {
+	if !strings.HasPrefix(progressText, "[BASH] → "+command+"\n") {
+		t.Fatalf("progress %q does not start with the bash command label", progressText)
+	}
+	for _, expected := range []string{"out-text", "err-text"} {
 		if !strings.Contains(progressText, expected) {
 			t.Fatalf("progress %q does not contain %q", progressText, expected)
 		}
