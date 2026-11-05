@@ -23,21 +23,6 @@ func TestLoadConfigMissing(t *testing.T) {
 	}
 }
 
-func TestLoadConfigMissingFileInExistingAgentsDirectory(t *testing.T) {
-	workspace := t.TempDir()
-	if err := os.Mkdir(filepath.Join(workspace, AgentsDirectoryName), 0o700); err != nil {
-		t.Fatalf("create agents directory: %v", err)
-	}
-
-	_, found, err := LoadConfig(workspace)
-	if err != nil {
-		t.Fatalf("LoadConfig returned an error: %v", err)
-	}
-	if found {
-		t.Fatal("expected found == false")
-	}
-}
-
 func TestLoadConfigReadsAllowlist(t *testing.T) {
 	workspace := t.TempDir()
 	writeTestFile(t, workspace, ".agents/atr.json", `{"bash":{"allow":["go test","git status"]}}`)

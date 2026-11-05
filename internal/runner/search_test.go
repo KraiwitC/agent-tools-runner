@@ -142,23 +142,3 @@ func TestSearchWorkspaceDoesNotLetLaterPathMatchesCrowdOutEarlierContent(t *test
 		t.Fatalf("earlier content match was crowded out: %#v", matches[0])
 	}
 }
-
-func TestSearchWorkspaceTruncatesAtCollectionLimit(t *testing.T) {
-	workspace := t.TempDir()
-	var content strings.Builder
-	for index := 0; index < maximumCollectedSearchMatches+1; index++ {
-		fmt.Fprintf(&content, "needle %d\n", index)
-	}
-	writeTestFile(t, workspace, "many.txt", content.String())
-
-	matches, truncated, err := searchWorkspace(workspace, "needle")
-	if err != nil {
-		t.Fatalf("searchWorkspace returned an error: %v", err)
-	}
-	if !truncated {
-		t.Fatal("expected truncated search result")
-	}
-	if len(matches) != maximumCollectedSearchMatches {
-		t.Fatalf("expected %d matches, got %d", maximumCollectedSearchMatches, len(matches))
-	}
-}

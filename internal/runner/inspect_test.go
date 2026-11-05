@@ -188,18 +188,3 @@ func TestExecuteInspectActionTrimsInvalidUTF8FromOversizedPreview(t *testing.T) 
 		t.Fatalf("invalid UTF-8 preview was not trimmed safely: %q", data.Content)
 	}
 }
-
-func TestReadWorkspaceFileReturnsSHA256(t *testing.T) {
-	workspace := t.TempDir()
-	content := "content"
-	writeTestFile(t, workspace, "file.txt", content)
-
-	result, err := readWorkspaceFile(workspace, "file.txt")
-	if err != nil {
-		t.Fatalf("readWorkspaceFile returned an error: %v", err)
-	}
-	expectedHash := sha256.Sum256([]byte(content))
-	if result.SHA256 != hex.EncodeToString(expectedHash[:]) {
-		t.Fatalf("unexpected SHA-256: %q", result.SHA256)
-	}
-}

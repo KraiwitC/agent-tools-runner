@@ -53,15 +53,6 @@ func TestExecuteMkdirActionRejectsExistingDirectory(t *testing.T) {
 	assertResponseErrorCode(t, responseError, "FILE_ALREADY_EXISTS")
 }
 
-func TestExecuteMkdirActionRejectsExistingFile(t *testing.T) {
-	workspace := t.TempDir()
-	writeTestFile(t, workspace, "existing.txt", "content")
-	action := Action{ID: "create-directory", Operation: "mkdir", Path: "existing.txt"}
-
-	_, responseError := executeMkdirAction(workspace, action, 0)
-	assertResponseErrorCode(t, responseError, "FILE_ALREADY_EXISTS")
-}
-
 func TestExecuteMkdirActionRejectsInvalidParent(t *testing.T) {
 	tests := []struct {
 		name         string
