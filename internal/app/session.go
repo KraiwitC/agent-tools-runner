@@ -220,6 +220,7 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 					request, err := runner.ParseAndValidateRequest(trimmedText)
 					if err == nil {
 						lastClipboardRequest = trimmedText
+						atrclipboard.Copy("ATR is running. Please wait for the JSON response.")
 						fmt.Println()
 						for _, action := range request.Actions {
 							if action.Operation == "bash" || action.Operation == "search" || action.Operation == "ranked_search" {
