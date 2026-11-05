@@ -83,6 +83,72 @@ func TestTerminalLineReaderHandlesBackspace(t *testing.T) {
 	}
 }
 
+type controlledLineScanner struct {
+	lines     []string
+	index     int
+	scanCalls chan int
+}
+
+func (c *controlledLineScanner) Scan() bool {
+	c.scanCalls <- c.index + 1
+	if c.index >= len(c.lines) {
+		return false
+	}
+	c.index++
+	return true
+}
+
+func (c *controlledLineScanner) Text() string {
+	return c.lines[c.index-1]
+}
+
+func (c *controlledLineScanner) Err() error {
+	return nil
+}
+
+func TestAsyncLineScannerDoesNotReadAhead(t *testing.T) {
+	controlled := &controlledLineScanner{
+		lines:     []string{"/auto", "{"},
+		scanCalls: make(chan int, 1),
+	}
+	scanner := newAsyncLineScanner(controlled)
+
+	if !scanner.Scan() {
+		t.Fatal("expected first scan to succeed")
+	}
+	if scanner.Text() != "/auto" {
+		t.Fatalf("first line = %q, want %q", scanner.Text(), "/auto")
+	}
+	select {
+	case call := <-controlled.scanCalls:
+		if call != 1 {
+			t.Fatalf("first scan call = %d, want 1", call)
+		}
+	default:
+		t.Fatal("expected first scan call")
+	}
+	select {
+	case call := <-controlled.scanCalls:
+		t.Fatalf("unexpected read-ahead scan call %d", call)
+	default:
+	}
+
+	if !scanner.Scan() {
+		t.Fatal("expected second scan to succeed")
+	}
+	if scanner.Text() != "{" {
+		t.Fatalf("second line = %q, want %q", scanner.Text(), "{")
+	}
+	select {
+	case call := <-controlled.scanCalls:
+		if call != 2 {
+			t.Fatalf("second scan call = %d, want 2", call)
+		}
+	default:
+		t.Fatal("expected second scan call")
+	}
+}
+
 func TestCollectJSONRequestWithCRLF(t *testing.T) {
 	input := "  \"version\": \"1\"\r\n}\r\n\r\n"
 	reader := newTerminalLineReader(strings.NewReader(input))

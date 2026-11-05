@@ -46,27 +46,43 @@ type scanResult struct {
 }
 
 type asyncLineScanner struct {
-	results <-chan scanResult
-	text    string
-	err     error
+	requests    chan struct{}
+	results     <-chan scanResult
+	scanPending bool
+	text        string
+	err         error
 }
 
 func newAsyncLineScanner(scanner lineScanner) *asyncLineScanner {
+	requests := make(chan struct{})
 	results := make(chan scanResult)
 	go func() {
 		defer close(results)
-		for scanner.Scan() {
-			results <- scanResult{text: scanner.Text()}
-		}
-		if err := scanner.Err(); err != nil {
-			results <- scanResult{err: err}
+		for range requests {
+			if scanner.Scan() {
+				results <- scanResult{text: scanner.Text()}
+				continue
+			}
+			if err := scanner.Err(); err != nil {
+				results <- scanResult{err: err}
+			}
+			return
 		}
 	}()
-	return &asyncLineScanner{results: results}
+	return &asyncLineScanner{requests: requests, results: results}
+}
+
+func (a *asyncLineScanner) requestScan() {
+	if !a.scanPending {
+		a.scanPending = true
+		a.requests <- struct{}{}
+	}
 }
 
 func (a *asyncLineScanner) Scan() bool {
+	a.requestScan()
 	result, ok := <-a.results
+	a.scanPending = false
 	if !ok {
 		return false
 	}
@@ -171,8 +187,10 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 				fmt.Print("Command > ")
 				autoPromptShown = true
 			}
+			scanner.requestScan()
 			select {
 			case result, ok := <-scanner.results:
+				scanner.scanPending = false
 				if !ok || result.err != nil {
 					fmt.Println()
 					return
