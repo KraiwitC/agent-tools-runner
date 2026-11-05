@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"agent-tools-runner/internal/app"
 	atrclipboard "agent-tools-runner/internal/clipboard"
@@ -55,7 +54,7 @@ func main() {
 		fmt.Println("Project instructions: none")
 	}
 	if len(skillNames) != 0 {
-		fmt.Printf("Skills: %s\n", strings.Join(skillNames, ", "))
+		fmt.Printf("Skills: %d loaded\n", len(skillNames))
 	} else {
 		fmt.Println("Skills: none")
 	}
