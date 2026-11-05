@@ -407,6 +407,81 @@ type batchEditState struct {
 	CurrentSHA256  string
 }
 
+type operationProgress struct {
+	label string
+	verb  string
+	noun  string
+	count int
+}
+
+func collectOperationProgress(actions []Action) map[string]operationProgress {
+	progressByOperation := make(map[string]operationProgress)
+	uniqueEditPaths := make(map[string]struct{})
+	for _, action := range actions {
+		switch action.Operation {
+		case "read":
+			progress := progressByOperation["read"]
+			progress = operationProgress{label: "READ", verb: "Reading", noun: "file", count: progress.count + len(action.Paths)}
+			progressByOperation["read"] = progress
+		case "read_range":
+			progress := progressByOperation["read"]
+			progress = operationProgress{label: "READ", verb: "Reading", noun: "file", count: progress.count + 1}
+			progressByOperation["read"] = progress
+		case "edit":
+			uniqueEditPaths[filepath.Clean(action.Path)] = struct{}{}
+		case "create":
+			progress := progressByOperation["create"]
+			progress = operationProgress{label: "CREATE", verb: "Creating", noun: "file", count: progress.count + 1}
+			progressByOperation["create"] = progress
+		case "copy":
+			progress := progressByOperation["copy"]
+			progress = operationProgress{label: "COPY", verb: "Copying", noun: "file", count: progress.count + 1}
+			progressByOperation["copy"] = progress
+		case "move":
+			progress := progressByOperation["move"]
+			progress = operationProgress{label: "MOVE", verb: "Moving", noun: "file", count: progress.count + 1}
+			progressByOperation["move"] = progress
+		case "inspect":
+			progress := progressByOperation["inspect"]
+			progress = operationProgress{label: "INSPECT", verb: "Inspecting", noun: "path", count: progress.count + 1}
+			progressByOperation["inspect"] = progress
+		case "mkdir":
+			progress := progressByOperation["mkdir"]
+			progress = operationProgress{label: "MKDIR", verb: "Creating", noun: "directory", count: progress.count + 1}
+			progressByOperation["mkdir"] = progress
+		case "delete":
+			progress := progressByOperation["delete"]
+			progress = operationProgress{label: "DELETE", verb: "Deleting", noun: "path", count: progress.count + 1}
+			progressByOperation["delete"] = progress
+		case "tree":
+			progress := progressByOperation["tree"]
+			progress = operationProgress{label: "TREE", verb: "Reading", noun: "directory", count: progress.count + 1}
+			progressByOperation["tree"] = progress
+		}
+	}
+	if len(uniqueEditPaths) > 0 {
+		progressByOperation["edit"] = operationProgress{label: "EDIT", verb: "Editing", noun: "file", count: len(uniqueEditPaths)}
+	}
+	return progressByOperation
+}
+
+func printOperationProgress(progress io.Writer, action Action, progressByOperation map[string]operationProgress, shown map[string]bool) {
+	operation := action.Operation
+	if operation == "read_range" {
+		operation = "read"
+	}
+	operationProgress, exists := progressByOperation[operation]
+	if !exists || shown[operation] {
+		return
+	}
+	shown[operation] = true
+	noun := operationProgress.noun
+	if operationProgress.count != 1 {
+		noun += "s"
+	}
+	_, _ = fmt.Fprintf(progress, "[%s] → %s %d %s\n", operationProgress.label, operationProgress.verb, operationProgress.count, noun)
+}
+
 func ExecuteRequest(workspace string, request Request, progress io.Writer) string {
 	response := Response{
 		Version: protocolVersion,
@@ -415,6 +490,8 @@ func ExecuteRequest(workspace string, request Request, progress io.Writer) strin
 	}
 	maxTransferChars := MaximumTransferChars()
 	batchEdits := make([]batchEditState, 0)
+	progressByOperation := collectOperationProgress(request.Actions)
+	shownProgress := make(map[string]bool)
 
 	for actionIndex, action := range request.Actions {
 		if isModifyingOperation(action.Operation) && !modifyingActionResultFits(response, action, actionIndex, maxTransferChars) {
@@ -441,6 +518,7 @@ func ExecuteRequest(workspace string, request Request, progress io.Writer) strin
 			}
 		}
 
+		printOperationProgress(progress, action, progressByOperation, shownProgress)
 		result, responseError := executeAction(workspace, action, actionIndex, progress)
 		if responseError != nil {
 			if action.Operation == "bash" {

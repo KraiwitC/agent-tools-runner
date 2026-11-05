@@ -142,6 +142,32 @@ func TestExecuteActionPrintsSearchProgress(t *testing.T) {
 	}
 }
 
+func TestOperationProgressAggregatesActions(t *testing.T) {
+	actions := []Action{
+		{Operation: "read", Paths: []string{"a.go", "b.go"}},
+		{Operation: "read_range", Path: "c.go"},
+		{Operation: "edit", Path: "a.go"},
+		{Operation: "edit", Path: "a.go"},
+		{Operation: "edit", Path: "b.go"},
+		{Operation: "create", Path: "new.go"},
+		{Operation: "inspect", Path: "a.go"},
+	}
+	progressByOperation := collectOperationProgress(actions)
+	shown := make(map[string]bool)
+	var progress strings.Builder
+	for _, action := range actions {
+		printOperationProgress(&progress, action, progressByOperation, shown)
+	}
+
+	expected := "[READ] → Reading 3 files\n" +
+		"[EDIT] → Editing 2 files\n" +
+		"[CREATE] → Creating 1 file\n" +
+		"[INSPECT] → Inspecting 1 path\n"
+	if progress.String() != expected {
+		t.Fatalf("progress = %q, want %q", progress.String(), expected)
+	}
+}
+
 func TestExecuteRequestPreservesResultWithinTransferLimit(t *testing.T) {
 	workspace := t.TempDir()
 	writeTestFile(t, workspace, "small.txt", "content")
