@@ -205,7 +205,8 @@ func TestSummarizeResponseFormatsReadSearchTreeAndRange(t *testing.T) {
 	}
 
 	expected := "\nSUCCESS\n\n" +
-		"  READ      2 files\n" +
+		"  READ      first.go\n" +
+		"  READ      second.go\n" +
 		"  SEARCH    \"needle\" (1 match), truncated\n" +
 		"  R_SEARCH  \"executeMoveActions\" (1 match)\n" +
 		"  TREE      . (2 entries), truncated\n" +

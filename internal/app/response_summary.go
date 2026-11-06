@@ -73,10 +73,14 @@ func summarizeActionResult(result runner.ActionResult) string {
 		detail := fmt.Sprintf("%q (%d %s)", data.Query, len(data.RankedMatches), pluralize(len(data.RankedMatches), "match", "matches"))
 		return appendTruncated(detail, data.Truncated)
 	case "read":
-		if len(data.Files) == 1 {
-			return data.Files[0].Path
+		if len(data.Files) == 0 {
+			return "0 files"
 		}
-		return fmt.Sprintf("%d files", len(data.Files))
+		paths := make([]string, 0, len(data.Files))
+		for _, file := range data.Files {
+			paths = append(paths, file.Path)
+		}
+		return strings.Join(paths, "\n  READ      ")
 	case "read_range":
 		return fmt.Sprintf("%s (lines %d-%d of %d)", data.Path, data.StartLine, data.EndLine, data.TotalLines)
 	case "edit":
