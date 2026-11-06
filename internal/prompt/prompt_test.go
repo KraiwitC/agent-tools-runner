@@ -134,7 +134,7 @@ func TestCreateListsAllowedBashCommands(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"### Execution Operations",
-		"bash: Run an allowlisted command",
+		"- bash {command, timeoutSeconds}: Run an allowlisted command",
 		"- go test\n",
 		"- git status\n",
 		"add it to bash.allow in .agents/atr.json",
@@ -157,7 +157,7 @@ func TestCreateStatesBashIsDisabledWithoutAllowlist(t *testing.T) {
 		if !strings.Contains(prompt, "bash is disabled") {
 			t.Fatal("prompt must say bash is disabled")
 		}
-		if strings.Contains(prompt, "bash: Run an allowlisted command") {
+		if strings.Contains(prompt, "Run an allowlisted command") {
 			t.Fatal("prompt must not document bash usage when it is disabled")
 		}
 	}
@@ -172,10 +172,10 @@ func TestCreateIncludesPromptGuidance(t *testing.T) {
 		"<a href=...>",
 		"Do not create a file and then edit it in the same request.",
 		"The .agents and .git folders are read-only",
-		"- BASH_NOT_ALLOWED:",
-		"- BASH_FAILED:",
-		"- BASH_TIMEOUT:",
-		"- PROTECTED_PATH:",
+		"BASH_NOT_ALLOWED:",
+		"BASH_FAILED:",
+		"BASH_TIMEOUT:",
+		"PROTECTED_PATH:",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("prompt does not contain %q", expected)
