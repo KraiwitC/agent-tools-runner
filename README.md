@@ -77,3 +77,7 @@ go build -o dist/atr ./cmd/atr
 ```
 
 Cross-compile with `GOOS` and `GOARCH`, for example `GOOS=windows GOARCH=amd64 go build -o dist/atr.exe ./cmd/atr`.
+
+## License
+
+[MIT](LICENSE) © 2026 Kraiwit Charojrochkul
