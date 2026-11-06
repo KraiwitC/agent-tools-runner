@@ -7,7 +7,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -55,8 +57,13 @@ func executeSearchAction(workspace string, action Action, actionIndex int) ([]Se
 }
 
 func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error) {
+	type searchCandidate struct {
+		pathMatch *SearchMatch
+		filePath  string
+	}
+
 	collectionLimit := maximumCollectedSearchMatches + 1
-	matches := make([]SearchMatch, 0, collectionLimit)
+	var candidates []searchCandidate
 	err := filepath.WalkDir(workspace, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -79,32 +86,73 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 			return err
 		}
 		normalizedPath := filepath.ToSlash(relativePath)
+		candidate := searchCandidate{}
 		if strings.Contains(normalizedPath, query) {
-			matches = append(matches, SearchMatch{
+			candidate.pathMatch = &SearchMatch{
 				Path:        normalizedPath,
 				MatchTarget: "path",
-			})
-			if len(matches) >= collectionLimit {
-				return fs.SkipAll
 			}
 		}
-
-		if entry.IsDir() || !entry.Type().IsRegular() {
-			return nil
+		if !entry.IsDir() && entry.Type().IsRegular() {
+			candidate.filePath = path
 		}
-		remainingMatches := collectionLimit - len(matches)
-		fileMatches, err := searchFile(workspace, path, query, remainingMatches)
-		if err != nil {
-			return err
-		}
-		matches = append(matches, fileMatches...)
-		if len(matches) >= collectionLimit {
-			return fs.SkipAll
+		if candidate.pathMatch != nil || candidate.filePath != "" {
+			candidates = append(candidates, candidate)
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, false, err
+	}
+
+	matches := make([]SearchMatch, 0, collectionLimit)
+	if len(candidates) > 0 {
+		workerCount := runtime.NumCPU()
+		if workerCount > len(candidates) {
+			workerCount = len(candidates)
+		}
+
+		for batchStart := 0; batchStart < len(candidates) && len(matches) < collectionLimit; batchStart += workerCount {
+			batchEnd := min(batchStart+workerCount, len(candidates))
+			batchMatches := make([][]SearchMatch, batchEnd-batchStart)
+			batchErrors := make([]error, batchEnd-batchStart)
+			var wg sync.WaitGroup
+
+			for candidateIndex := batchStart; candidateIndex < batchEnd; candidateIndex++ {
+				batchIndex := candidateIndex - batchStart
+				if candidates[candidateIndex].filePath == "" {
+					continue
+				}
+				wg.Add(1)
+				go func(batchIndex int, candidateIndex int) {
+					defer wg.Done()
+					batchMatches[batchIndex], batchErrors[batchIndex] = searchFile(workspace, candidates[candidateIndex].filePath, query, collectionLimit)
+				}(batchIndex, candidateIndex)
+			}
+			wg.Wait()
+
+			for candidateIndex := batchStart; candidateIndex < batchEnd; candidateIndex++ {
+				batchIndex := candidateIndex - batchStart
+				if batchErrors[batchIndex] != nil {
+					return nil, false, batchErrors[batchIndex]
+				}
+				if candidates[candidateIndex].pathMatch != nil {
+					matches = append(matches, *candidates[candidateIndex].pathMatch)
+				}
+				remainingMatches := collectionLimit - len(matches)
+				if remainingMatches <= 0 {
+					break
+				}
+				fileMatches := batchMatches[batchIndex]
+				if len(fileMatches) > remainingMatches {
+					fileMatches = fileMatches[:remainingMatches]
+				}
+				matches = append(matches, fileMatches...)
+				if len(matches) >= collectionLimit {
+					break
+				}
+			}
+		}
 	}
 
 	truncated := len(matches) > maximumCollectedSearchMatches
