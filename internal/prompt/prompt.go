@@ -68,7 +68,7 @@ Example action: {"id":"e1","operation":"edit","path":"main.go","expectedSha256":
 
 const bashEnabledInstructions = `### Execution Operations
 
-- bash {command, timeoutSeconds}: Run an allowlisted command in the workspace (PowerShell on Windows, bash elsewhere). Each action is a fresh process. timeoutSeconds is optional, at most 300. A non-zero exitCode is data, not an ATR error. ATR rejects shell control characters (; & | < > ` + "`" + ` ( ) { } $ and line breaks) even inside quotes, and the --output and --no-index arguments.
+- bash {command, timeoutSeconds}: Run an allowlisted command in the workspace (PowerShell on Windows, bash elsewhere). Each action is a fresh process. timeoutSeconds is optional, at most 300. A non-zero exitCode is data, not an ATR error. ATR rejects shell control characters (; & | < > ` + "`" + ` ( ) { } $ and line breaks) even inside quotes, and the --output and --no-index arguments. Shell glob expansion is disabled: wildcards such as *.go are passed to the command unchanged (git pathspecs still match them).
 
 Use bash only when no other operation can do the job, and ask the user to run long commands manually. If git diff is allowed, use it to review your changes after finishing edits. If a needed command is not allowed, suggest the user add it to bash.allow in .agents/atr.json and run /prompt. The .agents and .git folders are read-only.
 

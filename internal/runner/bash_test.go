@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -36,6 +37,8 @@ func runBashHelper(mode string) {
 	case "cwd":
 		workingDirectory, _ := os.Getwd()
 		fmt.Fprint(os.Stdout, workingDirectory)
+	case "args":
+		fmt.Fprint(os.Stdout, strings.Join(os.Args[1:], " "))
 	}
 	os.Exit(0)
 }
@@ -105,6 +108,22 @@ func TestExecuteBashActionRunsInWorkspace(t *testing.T) {
 	}
 	if !os.SameFile(reportedInfo, workspaceInfo) {
 		t.Fatalf("working directory = %q, want %q", data.Stdout, workspace)
+	}
+}
+
+func TestExecuteBashActionDisablesGlobExpansion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("glob expansion applies to bash")
+	}
+	workspace, command := newBashHelperWorkspace(t, "args")
+	writeTestFile(t, workspace, "a.txt", "a")
+
+	data, responseError := executeBashAction(workspace, Action{ID: "b1", Operation: "bash", Command: command + " *"}, 0, io.Discard)
+	if responseError != nil {
+		t.Fatalf("executeBashAction returned an error: %#v", responseError)
+	}
+	if data.Stdout != "*" {
+		t.Fatalf("stdout = %q, want %q", data.Stdout, "*")
 	}
 }
 
@@ -237,6 +256,10 @@ func TestExecuteBashActionRejectsFileAccessArguments(t *testing.T) {
 		`git show "--output=../escaped.txt"`,
 		`git diff --out"pu"t=../escaped.txt`,
 		`git diff --out\put=../escaped.txt`,
+		"git diff --out“”put=../escaped.txt",
+		"git diff --out‘’put=../escaped.txt",
+		"git diff --out„‚put=../escaped.txt",
+		"git diff --out‛put=../escaped.txt",
 		"git diff --no-index ../outside.txt inside.txt",
 	}
 

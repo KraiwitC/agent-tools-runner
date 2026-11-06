@@ -93,7 +93,7 @@ func isBashCommandAllowed(command string, allow []string) bool {
 }
 
 func hasForbiddenBashArgument(command string) bool {
-	unquotedCommand := strings.NewReplacer(`"`, "", `'`, "", `\`, "").Replace(command)
+	unquotedCommand := strings.NewReplacer(`"`, "", `'`, "", `\`, "", "‘", "", "’", "", "‚", "", "‛", "", "“", "", "”", "", "„", "").Replace(command)
 	for _, word := range strings.Fields(unquotedCommand) {
 		for _, forbidden := range bashForbiddenArguments {
 			if word == forbidden || strings.HasPrefix(word, forbidden+"=") {
@@ -110,9 +110,9 @@ func bashShellCommand(command string) (string, []string) {
 		return "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-Command", script}
 	}
 	if bashPath, err := exec.LookPath("bash"); err == nil {
-		return bashPath, []string{"-c", command}
+		return bashPath, []string{"-f", "-c", command}
 	}
-	return "sh", []string{"-c", command}
+	return "sh", []string{"-f", "-c", command}
 }
 
 func printableCommand(command string) string {
