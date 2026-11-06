@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTerminalLineReaderHandlesLineEndingsAndFinalLine(t *testing.T) {
@@ -197,6 +198,27 @@ func TestCollectJSONRequestRejectsPrematureEOFFromAsyncScanner(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ended before an empty terminating line") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAsyncLineScannerReturnsFalseAfterEOF(t *testing.T) {
+	reader := newAsyncLineScanner(bufio.NewScanner(strings.NewReader("  \"version\": \"1\"\n}")))
+
+	if _, _, err := collectJSONRequest("{", reader); err == nil {
+		t.Fatal("expected premature EOF error")
+	}
+
+	scanned := make(chan bool, 1)
+	go func() {
+		scanned <- reader.Scan()
+	}()
+	select {
+	case ok := <-scanned:
+		if ok {
+			t.Fatal("expected scan after EOF to fail")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("scan after EOF blocked")
 	}
 }
 

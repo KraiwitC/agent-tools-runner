@@ -49,6 +49,7 @@ type asyncLineScanner struct {
 	requests    chan struct{}
 	results     <-chan scanResult
 	scanPending bool
+	done        bool
 	text        string
 	err         error
 }
@@ -73,7 +74,7 @@ func newAsyncLineScanner(scanner lineScanner) *asyncLineScanner {
 }
 
 func (a *asyncLineScanner) requestScan() {
-	if !a.scanPending {
+	if !a.scanPending && !a.done {
 		a.scanPending = true
 		a.requests <- struct{}{}
 	}
@@ -84,10 +85,12 @@ func (a *asyncLineScanner) Scan() bool {
 	result, ok := <-a.results
 	a.scanPending = false
 	if !ok {
+		a.done = true
 		return false
 	}
 	a.text = result.text
 	a.err = result.err
+	a.done = result.err != nil
 	return result.err == nil
 }
 
