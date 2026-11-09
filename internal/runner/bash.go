@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+	"path"
 	"runtime"
 	"slices"
 	"strings"
@@ -34,6 +35,9 @@ func executeBashAction(workspace string, action Action, actionIndex int, progres
 	}
 	if hasForbiddenBashArgument(action.Command) {
 		return nil, newActionResponseError(action, actionIndex, "BASH_NOT_ALLOWED", "The --output and --no-index arguments are not allowed because they access files outside the workspace.", "")
+	}
+	if hasEscapingGitDiffPath(action.Command) {
+		return nil, newActionResponseError(action, actionIndex, "BASH_NOT_ALLOWED", "git diff paths must stay inside the workspace.", "")
 	}
 	if !isBashCommandAllowed(action.Command, config.Bash.Allow) {
 		return nil, newActionResponseError(action, actionIndex, "BASH_NOT_ALLOWED", "The command is not on the bash allowlist. Ask the user to add it to bash.allow in "+ConfigDisplayPath+" or to run it manually.", "")
@@ -87,6 +91,24 @@ func isBashCommandAllowed(command string, allow []string) bool {
 		entryWords := strings.Fields(entry)
 		if len(entryWords) > 0 && len(entryWords) <= len(commandWords) && slices.Equal(commandWords[:len(entryWords)], entryWords) {
 			return true
+		}
+	}
+	return false
+}
+
+func hasEscapingGitDiffPath(command string) bool {
+	words := strings.Fields(command)
+	if len(words) < 2 || words[0] != "git" || words[1] != "diff" {
+		return false
+	}
+	for _, word := range words[2:] {
+		value := strings.NewReplacer(`"`, "", `'`, "", `\`, "/").Replace(word)
+		cleaned := path.Clean(value)
+		if strings.HasPrefix(cleaned, "/") || cleaned == ".." || strings.HasPrefix(cleaned, "../") || len(cleaned) > 2 && cleaned[1] == ':' && cleaned[2] == '/' {
+			return true
+		}
+		if strings.HasPrefix(word, "-") {
+			continue
 		}
 	}
 	return false

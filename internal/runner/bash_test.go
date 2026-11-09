@@ -274,6 +274,29 @@ func TestExecuteBashActionRejectsFileAccessArguments(t *testing.T) {
 	}
 }
 
+func TestHasEscapingGitDiffPath(t *testing.T) {
+	for _, command := range []string{
+		"git diff ../secret.txt f.txt",
+		"git diff a/../../secret.txt",
+		"git diff /tmp/secret.txt",
+		`git diff C:\secret.txt`,
+		`git diff "../secret.txt"`,
+	} {
+		if !hasEscapingGitDiffPath(command) {
+			t.Fatalf("hasEscapingGitDiffPath(%q) = false, want true", command)
+		}
+	}
+	for _, command := range []string{
+		"git diff -- internal/runner/bash.go",
+		"git diff --stat",
+		"git diff HEAD~1 HEAD",
+	} {
+		if hasEscapingGitDiffPath(command) {
+			t.Fatalf("hasEscapingGitDiffPath(%q) = true, want false", command)
+		}
+	}
+}
+
 func TestHasForbiddenBashArgumentAllowsSimilarArguments(t *testing.T) {
 	for _, command := range []string{"git diff --stat", "tool --output-file=report.txt", "git log --oneline"} {
 		if hasForbiddenBashArgument(command) {
