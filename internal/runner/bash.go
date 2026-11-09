@@ -21,6 +21,7 @@ const bashWaitDelay = 2 * time.Second
 const bashForbiddenCharacters = ";&|<>`(){}$\r\n"
 
 var bashForbiddenArguments = []string{"--output", "--no-index"}
+var bashQuoteRemover = strings.NewReplacer(`"`, "", `'`, "", "‘", "", "’", "", "‚", "", "‛", "", "“", "", "”", "", "„", "")
 
 func executeBashAction(workspace string, action Action, actionIndex int, progress io.Writer) (*ActionData, *ResponseError) {
 	config, found, err := LoadConfig(workspace)
@@ -102,20 +103,17 @@ func hasEscapingGitDiffPath(command string) bool {
 		return false
 	}
 	for _, word := range words[2:] {
-		value := strings.NewReplacer(`"`, "", `'`, "", `\`, "/").Replace(word)
+		value := strings.ReplaceAll(bashQuoteRemover.Replace(word), `\`, "/")
 		cleaned := path.Clean(value)
-		if strings.HasPrefix(cleaned, "/") || cleaned == ".." || strings.HasPrefix(cleaned, "../") || len(cleaned) > 2 && cleaned[1] == ':' && cleaned[2] == '/' {
+		if strings.HasPrefix(cleaned, "/") || strings.HasPrefix(cleaned, "~") || cleaned == ".." || strings.HasPrefix(cleaned, "../") || len(cleaned) > 1 && cleaned[1] == ':' {
 			return true
-		}
-		if strings.HasPrefix(word, "-") {
-			continue
 		}
 	}
 	return false
 }
 
 func hasForbiddenBashArgument(command string) bool {
-	unquotedCommand := strings.NewReplacer(`"`, "", `'`, "", `\`, "", "‘", "", "’", "", "‚", "", "‛", "", "“", "", "”", "", "„", "").Replace(command)
+	unquotedCommand := strings.ReplaceAll(bashQuoteRemover.Replace(command), `\`, "")
 	for _, word := range strings.Fields(unquotedCommand) {
 		for _, forbidden := range bashForbiddenArguments {
 			if word == forbidden || strings.HasPrefix(word, forbidden+"=") {

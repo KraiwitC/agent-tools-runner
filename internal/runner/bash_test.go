@@ -280,7 +280,10 @@ func TestHasEscapingGitDiffPath(t *testing.T) {
 		"git diff a/../../secret.txt",
 		"git diff /tmp/secret.txt",
 		`git diff C:\secret.txt`,
+		`git diff C:..\secret.txt f.txt`,
 		`git diff "../secret.txt"`,
+		"git diff ‘../secret.txt’ f.txt",
+		"git diff ~/secret.txt f.txt",
 	} {
 		if !hasEscapingGitDiffPath(command) {
 			t.Fatalf("hasEscapingGitDiffPath(%q) = false, want true", command)
