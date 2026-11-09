@@ -16,6 +16,8 @@ const protocolVersion = "1"
 const maximumActions = 100
 const maximumEditReplacements = 100
 const maximumReadRangeLines = 1000
+const defaultBashTimeoutSeconds = 10
+const maximumBashTimeoutSeconds = 300
 const defaultMaximumTransferChars = 120000
 const sha256HexLength = 64
 
@@ -39,6 +41,8 @@ type Action struct {
 	EndLine        int           `json:"endLine,omitempty"`
 	ExpectedSHA256 string        `json:"expectedSha256,omitempty"`
 	Replacements   []Replacement `json:"replacements,omitempty"`
+	Command        string        `json:"command,omitempty"`
+	TimeoutSeconds int           `json:"timeoutSeconds,omitempty"`
 }
 
 type Replacement struct {
@@ -79,6 +83,11 @@ type ActionData struct {
 	Empty               *bool               `json:"empty,omitempty"`
 	ReplacementsApplied int                 `json:"replacementsApplied,omitempty"`
 	BytesWritten        int                 `json:"bytesWritten,omitempty"`
+	Command             string              `json:"command,omitempty"`
+	Stdout              string              `json:"stdout,omitempty"`
+	Stderr              string              `json:"stderr,omitempty"`
+	ExitCode            *int                `json:"exitCode,omitempty"`
+	TimedOut            bool                `json:"timedOut,omitempty"`
 }
 
 type TreeEntry struct {
@@ -249,6 +258,9 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 	if action.Operation != "copy" && action.Operation != "move" && (action.Source != "" || action.Destination != "") {
 		return fmt.Errorf("actions[%d] contains source or destination fields that are only supported for copy or move", index)
 	}
+	if action.Operation != "bash" && (action.Command != "" || action.TimeoutSeconds != 0) {
+		return fmt.Errorf("actions[%d] contains command fields that are only supported for bash", index)
+	}
 
 	switch action.Operation {
 	case "search":
@@ -338,9 +350,6 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 			return fmt.Errorf("actions[%d] contains fields that are not supported for %s", index, action.Operation)
 		}
 	case "tree":
-		if strings.TrimSpace(action.Path) == "" {
-			return fmt.Errorf("actions[%d].path is required for tree", index)
-		}
 		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for tree", index)
 		}
@@ -368,6 +377,16 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || len(action.Replacements) != 0 {
 			return fmt.Errorf("actions[%d] contains fields that are not supported for delete", index)
 		}
+	case "bash":
+		if strings.TrimSpace(action.Command) == "" {
+			return fmt.Errorf("actions[%d].command is required for bash", index)
+		}
+		if action.TimeoutSeconds < 0 || action.TimeoutSeconds > maximumBashTimeoutSeconds {
+			return fmt.Errorf("actions[%d].timeoutSeconds must be between 1 and %d when specified for bash", index, maximumBashTimeoutSeconds)
+		}
+		if action.Query != "" || len(action.Paths) != 0 || action.Path != "" || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for bash", index)
+		}
 	default:
 		return fmt.Errorf("actions[%d].operation %q is not supported", index, action.Operation)
 	}
@@ -388,7 +407,82 @@ type batchEditState struct {
 	CurrentSHA256  string
 }
 
-func ExecuteRequest(workspace string, request Request) string {
+type operationProgress struct {
+	label string
+	verb  string
+	noun  string
+	count int
+}
+
+func collectOperationProgress(actions []Action) map[string]operationProgress {
+	progressByOperation := make(map[string]operationProgress)
+	uniqueEditPaths := make(map[string]struct{})
+	for _, action := range actions {
+		switch action.Operation {
+		case "read":
+			progress := progressByOperation["read"]
+			progress = operationProgress{label: "READ", verb: "Reading", noun: "file", count: progress.count + len(action.Paths)}
+			progressByOperation["read"] = progress
+		case "read_range":
+			progress := progressByOperation["read"]
+			progress = operationProgress{label: "READ", verb: "Reading", noun: "file", count: progress.count + 1}
+			progressByOperation["read"] = progress
+		case "edit":
+			uniqueEditPaths[filepath.Clean(action.Path)] = struct{}{}
+		case "create":
+			progress := progressByOperation["create"]
+			progress = operationProgress{label: "CREATE", verb: "Creating", noun: "file", count: progress.count + 1}
+			progressByOperation["create"] = progress
+		case "copy":
+			progress := progressByOperation["copy"]
+			progress = operationProgress{label: "COPY", verb: "Copying", noun: "file", count: progress.count + 1}
+			progressByOperation["copy"] = progress
+		case "move":
+			progress := progressByOperation["move"]
+			progress = operationProgress{label: "MOVE", verb: "Moving", noun: "file", count: progress.count + 1}
+			progressByOperation["move"] = progress
+		case "inspect":
+			progress := progressByOperation["inspect"]
+			progress = operationProgress{label: "INSPECT", verb: "Inspecting", noun: "path", count: progress.count + 1}
+			progressByOperation["inspect"] = progress
+		case "mkdir":
+			progress := progressByOperation["mkdir"]
+			progress = operationProgress{label: "MKDIR", verb: "Creating", noun: "directory", count: progress.count + 1}
+			progressByOperation["mkdir"] = progress
+		case "delete":
+			progress := progressByOperation["delete"]
+			progress = operationProgress{label: "DELETE", verb: "Deleting", noun: "path", count: progress.count + 1}
+			progressByOperation["delete"] = progress
+		case "tree":
+			progress := progressByOperation["tree"]
+			progress = operationProgress{label: "TREE", verb: "Reading", noun: "directory", count: progress.count + 1}
+			progressByOperation["tree"] = progress
+		}
+	}
+	if len(uniqueEditPaths) > 0 {
+		progressByOperation["edit"] = operationProgress{label: "EDIT", verb: "Editing", noun: "file", count: len(uniqueEditPaths)}
+	}
+	return progressByOperation
+}
+
+func printOperationProgress(progress io.Writer, action Action, progressByOperation map[string]operationProgress, shown map[string]bool) {
+	operation := action.Operation
+	if operation == "read_range" {
+		operation = "read"
+	}
+	operationProgress, exists := progressByOperation[operation]
+	if !exists || shown[operation] {
+		return
+	}
+	shown[operation] = true
+	noun := operationProgress.noun
+	if operationProgress.count != 1 {
+		noun += "s"
+	}
+	_, _ = fmt.Fprintf(progress, "[%s] → %s %d %s\n", operationProgress.label, operationProgress.verb, operationProgress.count, noun)
+}
+
+func ExecuteRequest(workspace string, request Request, progress io.Writer) string {
 	response := Response{
 		Version: protocolVersion,
 		Status:  "success",
@@ -396,6 +490,8 @@ func ExecuteRequest(workspace string, request Request) string {
 	}
 	maxTransferChars := MaximumTransferChars()
 	batchEdits := make([]batchEditState, 0)
+	progressByOperation := collectOperationProgress(request.Actions)
+	shownProgress := make(map[string]bool)
 
 	for actionIndex, action := range request.Actions {
 		if isModifyingOperation(action.Operation) && !modifyingActionResultFits(response, action, actionIndex, maxTransferChars) {
@@ -422,8 +518,15 @@ func ExecuteRequest(workspace string, request Request) string {
 			}
 		}
 
-		result, responseError := executeAction(workspace, action, actionIndex)
+		printOperationProgress(progress, action, progressByOperation, shownProgress)
+		result, responseError := executeAction(workspace, action, actionIndex, progress)
 		if responseError != nil {
+			if action.Operation == "bash" {
+				errorResponse := response
+				errorResponse.Status = "error"
+				errorResponse.Error = responseError
+				result, _ = fitReadOnlyResult(errorResponse, result, maxTransferChars)
+			}
 			return finishActionError(response, result, responseError, action, actionIndex, maxTransferChars)
 		}
 		if action.Operation == "edit" && result.Data != nil {
@@ -452,7 +555,7 @@ func ExecuteRequest(workspace string, request Request) string {
 	return marshalResponse(response)
 }
 
-func executeAction(workspace string, action Action, actionIndex int) (ActionResult, *ResponseError) {
+func executeAction(workspace string, action Action, actionIndex int, progress io.Writer) (ActionResult, *ResponseError) {
 	result := ActionResult{
 		ID:        action.ID,
 		Operation: action.Operation,
@@ -460,8 +563,14 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 	}
 	var responseError *ResponseError
 
+	if responseError = protectedPathError(workspace, action, actionIndex); responseError != nil {
+		result.Status = "error"
+		return result, responseError
+	}
+
 	switch action.Operation {
 	case "search":
+		_, _ = fmt.Fprintf(progress, "[SEARCH] → %q\n", printableCommand(action.Query))
 		var matches []SearchMatch
 		var truncated bool
 		matches, truncated, responseError = executeSearchAction(workspace, action, actionIndex)
@@ -471,6 +580,7 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 			Truncated: truncated,
 		}
 	case "ranked_search":
+		_, _ = fmt.Fprintf(progress, "[SEARCH] → %q\n", printableCommand(action.Query))
 		var matches []RankedSearchMatch
 		var truncated bool
 		matches, truncated, responseError = executeRankedSearchAction(workspace, action, actionIndex)
@@ -537,6 +647,8 @@ func executeAction(workspace string, action Action, actionIndex int) (ActionResu
 		}
 	case "inspect":
 		result.Data, responseError = executeInspectAction(workspace, action, actionIndex)
+	case "bash":
+		result.Data, responseError = executeBashAction(workspace, action, actionIndex, progress)
 	case "mkdir":
 		var relativePath string
 		relativePath, responseError = executeMkdirAction(workspace, action, actionIndex)

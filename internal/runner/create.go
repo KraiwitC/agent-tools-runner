@@ -37,7 +37,7 @@ func executeCreateAction(workspace string, action Action, actionIndex int) (int,
 		}
 	}
 
-	bytesWritten, err := createFileSafely(resolvedPath, content)
+	bytesWritten, err := createFileSafely(resolvedPath, content, defaultCreatedFileMode)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return 0, relativePath, &ResponseError{
@@ -182,7 +182,7 @@ func validateCreateParentPath(workspace string, parentRelativePath string, respo
 	return nil
 }
 
-func createFileSafely(path string, content []byte) (int, error) {
+func createFileSafely(path string, content []byte, fileMode os.FileMode) (int, error) {
 	temporaryFile, err := os.CreateTemp(filepath.Dir(path), ".atr-create-*")
 	if err != nil {
 		return 0, fmt.Errorf("create temporary file: %w", err)
@@ -211,7 +211,7 @@ func createFileSafely(path string, content []byte) (int, error) {
 	}
 	defer sourceFile.Close()
 
-	targetFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, defaultCreatedFileMode)
+	targetFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
 	if err != nil {
 		return 0, fmt.Errorf("exclusively create target file: %w", err)
 	}

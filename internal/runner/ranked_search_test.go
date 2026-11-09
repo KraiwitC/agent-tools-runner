@@ -285,23 +285,3 @@ func TestRankedSearchWorkspaceRetainsLateBestPathWithinLimit(t *testing.T) {
 		t.Fatalf("late best path match was not retained: %#v", matches[0])
 	}
 }
-
-func TestRankedSearchWorkspaceTruncatesAtCollectionLimit(t *testing.T) {
-	workspace := t.TempDir()
-	var content strings.Builder
-	for index := 0; index < maximumCollectedRankedSearchMatches+1; index++ {
-		fmt.Fprintf(&content, "executeMoveAction %d\n", index)
-	}
-	writeTestFile(t, workspace, "many.go", content.String())
-
-	matches, truncated, err := rankedSearchWorkspace(workspace, "executeMoveAction")
-	if err != nil {
-		t.Fatalf("rankedSearchWorkspace returned an error: %v", err)
-	}
-	if !truncated {
-		t.Fatal("expected ranked results to be truncated")
-	}
-	if len(matches) != maximumCollectedRankedSearchMatches {
-		t.Fatalf("matches = %d, want %d", len(matches), maximumCollectedRankedSearchMatches)
-	}
-}

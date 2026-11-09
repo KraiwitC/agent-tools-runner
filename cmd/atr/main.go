@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"agent-tools-runner/internal/app"
 	atrclipboard "agent-tools-runner/internal/clipboard"
@@ -14,7 +13,7 @@ import (
 
 const (
 	applicationName    = "Agent Tools Runner"
-	applicationVersion = "v1.0.0"
+	applicationVersion = "v1.1.0"
 )
 
 type options struct {
@@ -39,7 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	bootstrapPrompt, agentsFileFound, skillNames, err := prompt.Create(workspace)
+	bootstrapPrompt, agentsFileFound, skillNames, err := app.CreateBootstrapPrompt(workspace)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create bootstrap prompt: %v\n", err)
 		os.Exit(1)
@@ -55,15 +54,19 @@ func main() {
 		fmt.Println("Project instructions: none")
 	}
 	if len(skillNames) != 0 {
-		fmt.Printf("Skills: %s\n", strings.Join(skillNames, ", "))
+		fmt.Printf("Skills: %d loaded\n", len(skillNames))
 	} else {
 		fmt.Println("Skills: none")
 	}
 	fmt.Println()
 	if clipboardReady {
-		atrclipboard.Copy(bootstrapPrompt)
-		fmt.Println("LLM bootstrap prompt copied to clipboard.")
-		fmt.Println("Paste it into your chatbot to begin.")
+		if err := atrclipboard.Copy(bootstrapPrompt); err != nil {
+			fmt.Printf("Failed to copy LLM bootstrap prompt: %v\n", err)
+			fmt.Println("Type /show-prompt to display the bootstrap prompt.")
+		} else {
+			fmt.Println("LLM bootstrap prompt copied to clipboard.")
+			fmt.Println("Paste it into your chatbot to begin.")
+		}
 	} else {
 		fmt.Printf("Clipboard is unavailable: %v\n", clipboardErr)
 		fmt.Println("Type /show-prompt to display the bootstrap prompt.")

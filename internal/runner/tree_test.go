@@ -37,6 +37,24 @@ func TestExecuteTreeActionReturnsSortedProjectEntries(t *testing.T) {
 	assertTreeEntries(t, entries, expected)
 }
 
+func TestExecuteTreeActionTreatsBlankPathAsWorkspaceRoot(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "file.txt", "content")
+	action := Action{ID: "project-tree", Operation: "tree"}
+
+	entries, relativePath, truncated, responseError := executeTreeAction(workspace, action, 0)
+	if responseError != nil {
+		t.Fatalf("executeTreeAction returned an error: %#v", responseError)
+	}
+	if relativePath != "." {
+		t.Fatalf("expected root path, got %q", relativePath)
+	}
+	if truncated {
+		t.Fatal("did not expect tree result to be truncated")
+	}
+	assertTreeEntries(t, entries, []TreeEntry{{Path: "file.txt", Type: "file"}})
+}
+
 func TestExecuteTreeActionReturnsUpperLevelEntriesBeforeDeepDescendants(t *testing.T) {
 	workspace := t.TempDir()
 	writeTestFile(t, workspace, "a-first/deeper/file.txt", "deep")

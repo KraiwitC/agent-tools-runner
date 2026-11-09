@@ -90,6 +90,53 @@ func TestSummarizeResponseFormatsSuccessfulActions(t *testing.T) {
 	}
 }
 
+func TestSummarizeResponseFormatsBashCommands(t *testing.T) {
+	response := runner.Response{
+		Version: "1",
+		Status:  "success",
+		Results: []runner.ActionResult{
+			{
+				ID:        "v-format-request-spacing",
+				Operation: "bash",
+				Status:    "success",
+				Data: &runner.ActionData{
+					Command: "go fmt ./...",
+				},
+			},
+			{
+				ID:        "v-app-tests",
+				Operation: "bash",
+				Status:    "success",
+				Data: &runner.ActionData{
+					Command: "go test ./internal/app",
+				},
+			},
+			{
+				ID:        "v-long-diff",
+				Operation: "bash",
+				Status:    "success",
+				Data: &runner.ActionData{
+					Command: "git diff -- internal/app/response_summary.go internal/app/response_summary_test.go internal/runner/bash.go",
+				},
+			},
+		},
+	}
+
+	responseText := marshalSummaryTestResponse(t, response)
+	summary, err := summarizeResponse(responseText)
+	if err != nil {
+		t.Fatalf("summarizeResponse returned an error: %v", err)
+	}
+
+	expected := "\nSUCCESS\n\n" +
+		"  BASH      go fmt ./...\n" +
+		"  BASH      go test ./internal/app\n" +
+		"  BASH      git diff -- internal/app/response_summary.go ..."
+	if summary != expected {
+		t.Fatalf("unexpected summary:\n%s\n\nexpected:\n%s", summary, expected)
+	}
+}
+
 func TestSummarizeResponseFormatsReadSearchTreeAndRange(t *testing.T) {
 	response := runner.Response{
 		Version: "1",
@@ -158,7 +205,8 @@ func TestSummarizeResponseFormatsReadSearchTreeAndRange(t *testing.T) {
 	}
 
 	expected := "\nSUCCESS\n\n" +
-		"  READ      2 files\n" +
+		"  READ      first.go\n" +
+		"  READ      second.go\n" +
 		"  SEARCH    \"needle\" (1 match), truncated\n" +
 		"  R_SEARCH  \"executeMoveActions\" (1 match)\n" +
 		"  TREE      . (2 entries), truncated\n" +

@@ -48,8 +48,14 @@ func TestExecuteInspectActionPreviewsOversizedTextFile(t *testing.T) {
 	if data.SizeBytes != int64(len(content)) || !data.Truncated {
 		t.Fatalf("unexpected oversized file metadata: %#v", data)
 	}
-	if len(data.Content) != 4095 || !utf8.ValidString(data.Content) || data.SHA256 != "" || data.LineCount != 0 {
+	if len(data.Content) != 4095 || !utf8.ValidString(data.Content) {
 		t.Fatalf("unexpected oversized file preview: %#v", data)
+	}
+	if data.SHA256 != calculateSHA256([]byte(content)) {
+		t.Fatalf("expected SHA256 %s, got %s", calculateSHA256([]byte(content)), data.SHA256)
+	}
+	if data.LineCount != countFileLines([]byte(content)) {
+		t.Fatalf("expected LineCount %d, got %d", countFileLines([]byte(content)), data.LineCount)
 	}
 }
 
@@ -172,22 +178,13 @@ func TestExecuteInspectActionTrimsInvalidUTF8FromOversizedPreview(t *testing.T) 
 	if data.Path != "large.txt" || data.Type != "file" || !data.Truncated {
 		t.Fatalf("unexpected inspect metadata: %#v", data)
 	}
+	if data.SHA256 != calculateSHA256(content) {
+		t.Fatalf("expected SHA256 %s, got %s", calculateSHA256(content), data.SHA256)
+	}
+	if data.LineCount != countFileLines(content) {
+		t.Fatalf("expected LineCount %d, got %d", countFileLines(content), data.LineCount)
+	}
 	if data.Content != "" || !utf8.ValidString(data.Content) {
 		t.Fatalf("invalid UTF-8 preview was not trimmed safely: %q", data.Content)
-	}
-}
-
-func TestReadWorkspaceFileReturnsSHA256(t *testing.T) {
-	workspace := t.TempDir()
-	content := "content"
-	writeTestFile(t, workspace, "file.txt", content)
-
-	result, err := readWorkspaceFile(workspace, "file.txt")
-	if err != nil {
-		t.Fatalf("readWorkspaceFile returned an error: %v", err)
-	}
-	expectedHash := sha256.Sum256([]byte(content))
-	if result.SHA256 != hex.EncodeToString(expectedHash[:]) {
-		t.Fatalf("unexpected SHA-256: %q", result.SHA256)
 	}
 }

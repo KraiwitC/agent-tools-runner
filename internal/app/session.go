@@ -46,30 +46,51 @@ type scanResult struct {
 }
 
 type asyncLineScanner struct {
-	results <-chan scanResult
-	text    string
-	err     error
+	requests    chan struct{}
+	results     <-chan scanResult
+	scanPending bool
+	done        bool
+	text        string
+	err         error
 }
 
 func newAsyncLineScanner(scanner lineScanner) *asyncLineScanner {
+	requests := make(chan struct{})
 	results := make(chan scanResult)
 	go func() {
 		defer close(results)
-		for scanner.Scan() {
-			results <- scanResult{text: scanner.Text()}
+		for range requests {
+			if scanner.Scan() {
+				results <- scanResult{text: scanner.Text()}
+				continue
+			}
+			if err := scanner.Err(); err != nil {
+				results <- scanResult{err: err}
+			}
+			return
 		}
-		results <- scanResult{err: scanner.Err()}
 	}()
-	return &asyncLineScanner{results: results}
+	return &asyncLineScanner{requests: requests, results: results}
+}
+
+func (a *asyncLineScanner) requestScan() {
+	if !a.scanPending && !a.done {
+		a.scanPending = true
+		a.requests <- struct{}{}
+	}
 }
 
 func (a *asyncLineScanner) Scan() bool {
+	a.requestScan()
 	result, ok := <-a.results
+	a.scanPending = false
 	if !ok {
+		a.done = true
 		return false
 	}
 	a.text = result.text
 	a.err = result.err
+	a.done = result.err != nil
 	return result.err == nil
 }
 
@@ -82,9 +103,10 @@ func (a *asyncLineScanner) Err() error {
 }
 
 type terminalLineReader struct {
-	reader *bufio.Reader
-	line   string
-	err    error
+	reader       *bufio.Reader
+	line         string
+	err          error
+	skipLineFeed bool
 }
 
 func newTerminalLineReader(r io.Reader) *terminalLineReader {
@@ -115,10 +137,14 @@ func (t *terminalLineReader) Scan() bool {
 			continue
 		}
 
+		if r == '\n' && t.skipLineFeed {
+			t.skipLineFeed = false
+			continue
+		}
+		t.skipLineFeed = false
+
 		if r == '\r' {
-			if peek, err := t.reader.Peek(1); err == nil && len(peek) > 0 && peek[0] == '\n' {
-				_, _ = t.reader.ReadByte()
-			}
+			t.skipLineFeed = true
 			fmt.Println()
 			t.line = string(lineRunes)
 			return true
@@ -164,8 +190,10 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 				fmt.Print("Command > ")
 				autoPromptShown = true
 			}
+			scanner.requestScan()
 			select {
 			case result, ok := <-scanner.results:
+				scanner.scanPending = false
 				if !ok || result.err != nil {
 					fmt.Println()
 					return
@@ -190,13 +218,19 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 					return
 				}
 			case <-ticker.C:
-				trimmedText := strings.TrimSpace(atrclipboard.Read())
+				clipboardText, err := atrclipboard.Read()
+				if err != nil {
+					continue
+				}
+				trimmedText := strings.TrimSpace(clipboardText)
 				if looksLikeRequest(trimmedText) && trimmedText != lastClipboardRequest {
 					request, err := runner.ParseAndValidateRequest(trimmedText)
 					if err == nil {
 						lastClipboardRequest = trimmedText
+						_ = atrclipboard.Copy("ATR is running. Please wait for the JSON response.")
 						fmt.Println()
-						responseText := runner.ExecuteRequest(workspace, request)
+						fmt.Println()
+						responseText := runner.ExecuteRequest(workspace, request, os.Stdout)
 						lastResponse = responseText
 						presentResponse(responseText, clipboardReady)
 						autoPromptShown = false
@@ -263,7 +297,7 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 			continue
 		}
 
-		responseText := runner.ExecuteRequest(workspace, request)
+		responseText := runner.ExecuteRequest(workspace, request, os.Stdout)
 		lastResponse = responseText
 		presentResponse(responseText, clipboardReady)
 	}
@@ -327,20 +361,23 @@ func handleCommand(command string, workspace string, lastResponse string, clipbo
 	case "/help":
 		printHelp()
 	case "/prompt":
-		bootstrapPrompt, _, _, err := prompt.Create(workspace)
+		bootstrapPrompt, _, _, err := CreateBootstrapPrompt(workspace)
 		if err != nil {
 			fmt.Printf("Failed to refresh LLM bootstrap prompt: %v\n", err)
 		} else if clipboardReady {
-			atrclipboard.Copy(bootstrapPrompt)
-			fmt.Println("Refreshed LLM bootstrap prompt copied to clipboard.")
-			fmt.Println("Start a new conversation and paste the prompt for refreshed project instructions to take effect.")
+			if err := atrclipboard.Copy(bootstrapPrompt); err != nil {
+				fmt.Printf("Failed to copy refreshed LLM bootstrap prompt: %v\n", err)
+			} else {
+				fmt.Println("Refreshed LLM bootstrap prompt copied to clipboard.")
+				fmt.Println("Start a new conversation and paste the prompt for refreshed project instructions to take effect.")
+			}
 			fmt.Println()
 		} else {
 			fmt.Println("Clipboard is unavailable. Type /show-prompt to display a refreshed bootstrap prompt.")
 			fmt.Println()
 		}
 	case "/show-prompt":
-		bootstrapPrompt, _, _, err := prompt.Create(workspace)
+		bootstrapPrompt, _, _, err := CreateBootstrapPrompt(workspace)
 		if err != nil {
 			fmt.Printf("Failed to refresh LLM bootstrap prompt: %v\n", err)
 			fmt.Println()
@@ -348,13 +385,23 @@ func handleCommand(command string, workspace string, lastResponse string, clipbo
 			fmt.Println(bootstrapPrompt)
 			fmt.Println()
 		}
+	case "/init":
+		if err := initializeAgentsFolder(workspace, os.Stdout); err != nil {
+			fmt.Printf("Failed to initialize %s: %v\n", runner.AgentsDirectoryName, err)
+		} else {
+			fmt.Printf("Edit %s/%s to change the allowed bash commands, then run /prompt.\n", runner.AgentsDirectoryName, runner.ConfigFileName)
+		}
+		fmt.Println()
 	case "/copy":
 		if lastResponse == "" {
 			fmt.Println("No JSON response is available to copy.")
 			fmt.Println()
 		} else if clipboardReady {
-			atrclipboard.Copy(lastResponse)
-			fmt.Println("Last JSON response copied to clipboard.")
+			if err := atrclipboard.Copy(lastResponse); err != nil {
+				fmt.Printf("Failed to copy last JSON response: %v\n", err)
+			} else {
+				fmt.Println("Last JSON response copied to clipboard.")
+			}
 			fmt.Println()
 		} else {
 			fmt.Println("Clipboard is unavailable. Type /show to display the last JSON response.")
@@ -417,8 +464,11 @@ func presentResponse(responseText string, clipboardReady bool) {
 	}
 	fmt.Println()
 	if clipboardReady {
-		atrclipboard.Copy(responseText)
-		fmt.Println("JSON response copied to clipboard.")
+		if err := atrclipboard.Copy(responseText); err != nil {
+			fmt.Printf("Failed to copy JSON response: %v\n", err)
+		} else {
+			fmt.Println("JSON response copied to clipboard.")
+		}
 	} else {
 		fmt.Println("Clipboard is unavailable. Type /show to view the complete JSON response.")
 	}
@@ -430,6 +480,7 @@ func printHelp() {
 	fmt.Println("  /help         Show available commands")
 	fmt.Println("  /prompt       Copy the LLM bootstrap prompt")
 	fmt.Println("  /show-prompt  Show the LLM bootstrap prompt")
+	fmt.Println("  /init         Create the .agents folder structure")
 	fmt.Println("  /copy         Copy the last complete JSON response")
 	fmt.Println("  /show         Show the last complete JSON response")
 	fmt.Println("  /limit [n]    Show or set the transfer limit")
@@ -459,4 +510,99 @@ func ResolveWorkspace(path string) (string, error) {
 		return "", errors.New("workspace is not a directory")
 	}
 	return filepath.Clean(absolutePath), nil
+}
+
+func CreateBootstrapPrompt(workspace string) (string, bool, []string, error) {
+	var bashAllow []string
+	config, found, err := runner.LoadConfig(workspace)
+	if err != nil {
+		fmt.Printf("Warning: %v. bash is disabled.\n", err)
+	} else if found {
+		bashAllow = config.Bash.Allow
+	}
+
+	bootstrapPrompt, agentsFileFound, skillNames, warnings, err := prompt.Create(workspace, bashAllow)
+	if err != nil {
+		return "", false, nil, err
+	}
+	for _, warning := range warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+	return bootstrapPrompt, agentsFileFound, skillNames, nil
+}
+
+const initialConfigContent = `{
+  "bash": {
+    "allow": ["git status", "git diff", "git log", "git show"]
+  }
+}
+`
+
+func initializeAgentsFolder(workspace string, output io.Writer) error {
+	for _, displayPath := range []string{runner.AgentsDirectoryName, runner.AgentsDirectoryName + "/" + prompt.SkillsDirectoryName} {
+		created, err := createDirectoryIfMissing(filepath.Join(workspace, filepath.FromSlash(displayPath)))
+		if err != nil {
+			return fmt.Errorf("%s: %w", displayPath, underlyingError(err))
+		}
+		printInitResult(output, displayPath, created)
+	}
+
+	created, err := createConfigIfMissing(filepath.Join(workspace, filepath.FromSlash(runner.ConfigDisplayPath)))
+	if err != nil {
+		return fmt.Errorf("%s: %w", runner.ConfigDisplayPath, underlyingError(err))
+	}
+	printInitResult(output, runner.ConfigDisplayPath, created)
+	return nil
+}
+
+func createDirectoryIfMissing(directoryPath string) (bool, error) {
+	err := os.Mkdir(directoryPath, 0o755)
+	if err == nil {
+		return true, nil
+	}
+	if !errors.Is(err, os.ErrExist) {
+		return false, err
+	}
+	info, err := os.Lstat(directoryPath)
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return false, errors.New("must not be a symbolic link")
+	}
+	if !info.IsDir() {
+		return false, errors.New("exists and is not a directory")
+	}
+	return false, nil
+}
+
+func createConfigIfMissing(configPath string) (bool, error) {
+	file, err := os.OpenFile(configPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if errors.Is(err, os.ErrExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	_, writeErr := file.WriteString(initialConfigContent)
+	if err := errors.Join(writeErr, file.Close()); err != nil {
+		os.Remove(configPath)
+		return false, err
+	}
+	return true, nil
+}
+func printInitResult(output io.Writer, displayPath string, created bool) {
+	if created {
+		fmt.Fprintf(output, "Created %s\n", displayPath)
+	} else {
+		fmt.Fprintf(output, "%s already exists\n", displayPath)
+	}
+}
+
+func underlyingError(err error) error {
+	var pathError *os.PathError
+	if errors.As(err, &pathError) {
+		return pathError.Err
+	}
+	return err
 }

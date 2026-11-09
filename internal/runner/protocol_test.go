@@ -3,6 +3,7 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -119,6 +120,54 @@ func TestParseAndValidateRequestRejectsDuplicateActionIDs(t *testing.T) {
 	}
 }
 
+func TestExecuteActionPrintsSearchProgress(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, "example.txt", "executeSearchAction\n")
+	var progress strings.Builder
+
+	actions := []Action{
+		{ID: "search", Operation: "search", Query: "executeSearchAction"},
+		{ID: "ranked-search", Operation: "ranked_search", Query: "execute search action"},
+	}
+	for actionIndex, action := range actions {
+		_, responseError := executeAction(workspace, action, actionIndex, &progress)
+		if responseError != nil {
+			t.Fatalf("executeAction returned an error for %s: %#v", action.Operation, responseError)
+		}
+	}
+
+	expected := "[SEARCH] → \"executeSearchAction\"\n[SEARCH] → \"execute search action\"\n"
+	if progress.String() != expected {
+		t.Fatalf("progress = %q, want %q", progress.String(), expected)
+	}
+}
+
+func TestOperationProgressAggregatesActions(t *testing.T) {
+	actions := []Action{
+		{Operation: "read", Paths: []string{"a.go", "b.go"}},
+		{Operation: "read_range", Path: "c.go"},
+		{Operation: "edit", Path: "a.go"},
+		{Operation: "edit", Path: "a.go"},
+		{Operation: "edit", Path: "b.go"},
+		{Operation: "create", Path: "new.go"},
+		{Operation: "inspect", Path: "a.go"},
+	}
+	progressByOperation := collectOperationProgress(actions)
+	shown := make(map[string]bool)
+	var progress strings.Builder
+	for _, action := range actions {
+		printOperationProgress(&progress, action, progressByOperation, shown)
+	}
+
+	expected := "[READ] → Reading 3 files\n" +
+		"[EDIT] → Editing 2 files\n" +
+		"[CREATE] → Creating 1 file\n" +
+		"[INSPECT] → Inspecting 1 path\n"
+	if progress.String() != expected {
+		t.Fatalf("progress = %q, want %q", progress.String(), expected)
+	}
+}
+
 func TestExecuteRequestPreservesResultWithinTransferLimit(t *testing.T) {
 	workspace := t.TempDir()
 	writeTestFile(t, workspace, "small.txt", "content")
@@ -129,7 +178,7 @@ func TestExecuteRequestPreservesResultWithinTransferLimit(t *testing.T) {
 		},
 	}
 
-	responseText := ExecuteRequest(workspace, request)
+	responseText := ExecuteRequest(workspace, request, io.Discard)
 	var response Response
 	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -413,7 +462,7 @@ func TestExecuteRequestStopsAfterFirstFailure(t *testing.T) {
 		},
 	}
 
-	responseText := ExecuteRequest(workspace, request)
+	responseText := ExecuteRequest(workspace, request, io.Discard)
 	var response Response
 	if err := json.Unmarshal([]byte(responseText), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -588,7 +637,6 @@ func TestValidateRequestRejectsMissingRequiredFields(t *testing.T) {
 		{name: "copy destination", action: Action{ID: "copy", Operation: "copy", Source: "source.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
 		{name: "move source", action: Action{ID: "move", Operation: "move", Destination: "destination.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
 		{name: "move destination", action: Action{ID: "move", Operation: "move", Source: "source.txt", ExpectedSHA256: strings.Repeat("0", sha256HexLength)}},
-		{name: "tree path", action: Action{ID: "tree", Operation: "tree"}},
 		{name: "inspect path", action: Action{ID: "inspect", Operation: "inspect"}},
 		{name: "mkdir path", action: Action{ID: "mkdir", Operation: "mkdir"}},
 		{name: "delete path", action: Action{ID: "delete", Operation: "delete"}},
@@ -640,7 +688,7 @@ func TestValidateRequestRejectsInvalidSHA256Variants(t *testing.T) {
 
 func executeRequestForTest(t *testing.T, workspace string, request Request) Response {
 	t.Helper()
-	responseText := ExecuteRequest(workspace, request)
+	responseText := ExecuteRequest(workspace, request, io.Discard)
 	if len(responseText) > MaximumTransferChars() {
 		t.Fatalf("response length = %d, want at most %d", len(responseText), MaximumTransferChars())
 	}
@@ -649,4 +697,26 @@ func executeRequestForTest(t *testing.T, workspace string, request Request) Resp
 		t.Fatalf("decode response: %v", err)
 	}
 	return response
+}
+
+func TestMaximumFittingCountMatchesLinearScan(t *testing.T) {
+	for length := 0; length <= 40; length++ {
+		for threshold := 0; threshold <= length; threshold++ {
+			got := maximumFittingCount(length, func(count int) bool { return count <= threshold })
+			if got != threshold {
+				t.Fatalf("length %d threshold %d: got %d", length, threshold, got)
+			}
+		}
+	}
+}
+
+func TestTrimTextToFitKeepsLongestFittingRunes(t *testing.T) {
+	content := "héllo wörld ✓"
+	runes := []rune(content)
+	for limit := 0; limit <= len(runes); limit++ {
+		got := trimTextToFit(content, func(candidate string) bool { return len([]rune(candidate)) <= limit })
+		if got != string(runes[:limit]) {
+			t.Fatalf("limit %d: got %q", limit, got)
+		}
+	}
 }

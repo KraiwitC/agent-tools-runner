@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"agent-tools-runner/internal/runner"
 )
@@ -72,10 +73,14 @@ func summarizeActionResult(result runner.ActionResult) string {
 		detail := fmt.Sprintf("%q (%d %s)", data.Query, len(data.RankedMatches), pluralize(len(data.RankedMatches), "match", "matches"))
 		return appendTruncated(detail, data.Truncated)
 	case "read":
-		if len(data.Files) == 1 {
-			return data.Files[0].Path
+		if len(data.Files) == 0 {
+			return "0 files"
 		}
-		return fmt.Sprintf("%d files", len(data.Files))
+		paths := make([]string, 0, len(data.Files))
+		for _, file := range data.Files {
+			paths = append(paths, file.Path)
+		}
+		return strings.Join(paths, "\n  READ      ")
 	case "read_range":
 		return fmt.Sprintf("%s (lines %d-%d of %d)", data.Path, data.StartLine, data.EndLine, data.TotalLines)
 	case "edit":
@@ -97,6 +102,8 @@ func summarizeActionResult(result runner.ActionResult) string {
 			return data.Path
 		}
 		return fmt.Sprintf("%s (%s)", data.Path, data.Type)
+	case "bash":
+		return truncateSummaryText(data.Command, 48)
 	default:
 		if data.Path != "" {
 			return data.Path
@@ -120,6 +127,13 @@ func summarizeInspectResult(data *runner.ActionData) string {
 		return fmt.Sprintf("%s (%s)", data.Path, data.Type)
 	}
 	return data.Path
+}
+
+func truncateSummaryText(text string, maximumCharacters int) string {
+	if utf8.RuneCountInString(text) <= maximumCharacters {
+		return text
+	}
+	return string([]rune(text)[:maximumCharacters-3]) + "..."
 }
 
 func appendTruncated(detail string, truncated bool) string {
