@@ -227,9 +227,7 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 					request, err := runner.ParseAndValidateRequest(trimmedText)
 					if err == nil {
 						lastClipboardRequest = trimmedText
-						if err := atrclipboard.Copy("ATR is running. Please wait for the JSON response."); err != nil {
-							clipboardReady = false
-						}
+						_ = atrclipboard.Copy("ATR is running. Please wait for the JSON response.")
 						fmt.Println()
 						fmt.Println()
 						responseText := runner.ExecuteRequest(workspace, request, os.Stdout)
