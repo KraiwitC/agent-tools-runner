@@ -60,9 +60,13 @@ func main() {
 	}
 	fmt.Println()
 	if clipboardReady {
-		atrclipboard.Copy(bootstrapPrompt)
-		fmt.Println("LLM bootstrap prompt copied to clipboard.")
-		fmt.Println("Paste it into your chatbot to begin.")
+		if err := atrclipboard.Copy(bootstrapPrompt); err != nil {
+			fmt.Printf("Failed to copy LLM bootstrap prompt: %v\n", err)
+			fmt.Println("Type /show-prompt to display the bootstrap prompt.")
+		} else {
+			fmt.Println("LLM bootstrap prompt copied to clipboard.")
+			fmt.Println("Paste it into your chatbot to begin.")
+		}
 	} else {
 		fmt.Printf("Clipboard is unavailable: %v\n", clipboardErr)
 		fmt.Println("Type /show-prompt to display the bootstrap prompt.")

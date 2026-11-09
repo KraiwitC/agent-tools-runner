@@ -218,12 +218,18 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 					return
 				}
 			case <-ticker.C:
-				trimmedText := strings.TrimSpace(atrclipboard.Read())
+				clipboardText, err := atrclipboard.Read()
+				if err != nil {
+					continue
+				}
+				trimmedText := strings.TrimSpace(clipboardText)
 				if looksLikeRequest(trimmedText) && trimmedText != lastClipboardRequest {
 					request, err := runner.ParseAndValidateRequest(trimmedText)
 					if err == nil {
 						lastClipboardRequest = trimmedText
-						atrclipboard.Copy("ATR is running. Please wait for the JSON response.")
+						if err := atrclipboard.Copy("ATR is running. Please wait for the JSON response."); err != nil {
+							clipboardReady = false
+						}
 						fmt.Println()
 						fmt.Println()
 						responseText := runner.ExecuteRequest(workspace, request, os.Stdout)
@@ -361,9 +367,12 @@ func handleCommand(command string, workspace string, lastResponse string, clipbo
 		if err != nil {
 			fmt.Printf("Failed to refresh LLM bootstrap prompt: %v\n", err)
 		} else if clipboardReady {
-			atrclipboard.Copy(bootstrapPrompt)
-			fmt.Println("Refreshed LLM bootstrap prompt copied to clipboard.")
-			fmt.Println("Start a new conversation and paste the prompt for refreshed project instructions to take effect.")
+			if err := atrclipboard.Copy(bootstrapPrompt); err != nil {
+				fmt.Printf("Failed to copy refreshed LLM bootstrap prompt: %v\n", err)
+			} else {
+				fmt.Println("Refreshed LLM bootstrap prompt copied to clipboard.")
+				fmt.Println("Start a new conversation and paste the prompt for refreshed project instructions to take effect.")
+			}
 			fmt.Println()
 		} else {
 			fmt.Println("Clipboard is unavailable. Type /show-prompt to display a refreshed bootstrap prompt.")
@@ -390,8 +399,11 @@ func handleCommand(command string, workspace string, lastResponse string, clipbo
 			fmt.Println("No JSON response is available to copy.")
 			fmt.Println()
 		} else if clipboardReady {
-			atrclipboard.Copy(lastResponse)
-			fmt.Println("Last JSON response copied to clipboard.")
+			if err := atrclipboard.Copy(lastResponse); err != nil {
+				fmt.Printf("Failed to copy last JSON response: %v\n", err)
+			} else {
+				fmt.Println("Last JSON response copied to clipboard.")
+			}
 			fmt.Println()
 		} else {
 			fmt.Println("Clipboard is unavailable. Type /show to display the last JSON response.")
@@ -454,8 +466,11 @@ func presentResponse(responseText string, clipboardReady bool) {
 	}
 	fmt.Println()
 	if clipboardReady {
-		atrclipboard.Copy(responseText)
-		fmt.Println("JSON response copied to clipboard.")
+		if err := atrclipboard.Copy(responseText); err != nil {
+			fmt.Printf("Failed to copy JSON response: %v\n", err)
+		} else {
+			fmt.Println("JSON response copied to clipboard.")
+		}
 	} else {
 		fmt.Println("Clipboard is unavailable. Type /show to view the complete JSON response.")
 	}
