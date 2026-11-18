@@ -13,7 +13,7 @@ import (
 
 const (
 	applicationName    = "Agent Tools Runner"
-	applicationVersion = "v1.1.0"
+	applicationVersion = "v1.1.1"
 )
 
 type options struct {
