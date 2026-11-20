@@ -285,3 +285,17 @@ func TestRankedSearchWorkspaceRetainsLateBestPathWithinLimit(t *testing.T) {
 		t.Fatalf("late best path match was not retained: %#v", matches[0])
 	}
 }
+
+func TestRankedSearchWorkspaceHidesWorkspaceAgentsDirectory(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, ".agents/atr.json", "needleSymbol\n")
+	writeTestFile(t, workspace, "sub/.agents/note.txt", "needleSymbol\n")
+
+	matches, _, err := rankedSearchWorkspace(workspace, "needleSymbol")
+	if err != nil {
+		t.Fatalf("rankedSearchWorkspace returned an error: %v", err)
+	}
+	if len(matches) != 1 || matches[0].Path != "sub/.agents/note.txt" {
+		t.Fatalf("unexpected matches: %#v", matches)
+	}
+}

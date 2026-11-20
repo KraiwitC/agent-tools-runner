@@ -77,7 +77,7 @@ func searchWorkspace(workspace string, query string) ([]SearchMatch, bool, error
 			}
 			return nil
 		}
-		if entry.IsDir() && isSearchExcludedDirectory(entry.Name()) {
+		if entry.IsDir() && (isSearchExcludedDirectory(entry.Name()) || isWorkspaceAgentsDirectory(workspace, path)) {
 			return filepath.SkipDir
 		}
 
@@ -215,4 +215,8 @@ func searchFile(workspace string, path string, query string, matchLimit int) ([]
 func isSearchExcludedDirectory(name string) bool {
 	_, excluded := defaultSearchExcludedDirectories[name]
 	return excluded
+}
+
+func isWorkspaceAgentsDirectory(workspace string, path string) bool {
+	return filepath.Dir(path) == workspace && strings.EqualFold(filepath.Base(path), AgentsDirectoryName)
 }
