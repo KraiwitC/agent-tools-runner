@@ -44,7 +44,7 @@ Run `atr` without `--auto` to paste each JSON request manually.
 
 ## Operations
 
-- **Inspect:** `tree`, `search`, `ranked_search`, `read`, `read_range`, and `inspect`
+- **Inspect:** `tree`, `search`, `ranked_search`, `read`, `read_range`, `inspect`, and `read_skill`
 - **Modify:** `edit`, `create`, `copy`, `move`, `mkdir`, and `delete`
 - **Bash:** Runs explicitly allowlisted commands through the host shell.
 
@@ -61,6 +61,8 @@ Run `/init` to create the `.agents` folder without overwriting existing files:
     <skill-name>/
       SKILL.md      # listed in the prompt using its frontmatter description
 ```
+
+Skills in `~/.agents/skills` are also listed and can be read with `read_skill`; a workspace skill overrides a user skill with the same name. The `.agents` and `.git` folders are hidden from `tree` and search results.
 
 `atr.json` controls the Bash allowlist.
 
