@@ -121,7 +121,8 @@ func readWorkspaceTree(workspace string, root string) ([]TreeEntry, bool, error)
 			if entry.Type()&os.ModeSymlink != 0 {
 				continue
 			}
-			if entry.IsDir() && isSearchExcludedDirectory(entry.Name()) {
+			path := filepath.Join(currentDirectory, entry.Name())
+			if entry.IsDir() && (isSearchExcludedDirectory(entry.Name()) || isWorkspaceAgentsDirectory(workspace, path)) {
 				continue
 			}
 			if !entry.IsDir() && !entry.Type().IsRegular() {
@@ -132,7 +133,6 @@ func readWorkspaceTree(workspace string, root string) ([]TreeEntry, bool, error)
 				return entries, true, nil
 			}
 
-			path := filepath.Join(currentDirectory, entry.Name())
 			relativePath, err := filepath.Rel(workspace, path)
 			if err != nil {
 				return entries, false, err

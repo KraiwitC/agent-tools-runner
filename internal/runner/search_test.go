@@ -142,3 +142,17 @@ func TestSearchWorkspaceDoesNotLetLaterPathMatchesCrowdOutEarlierContent(t *test
 		t.Fatalf("earlier content match was crowded out: %#v", matches[0])
 	}
 }
+
+func TestSearchWorkspaceHidesWorkspaceAgentsDirectory(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, ".agents/atr.json", "needle\n")
+	writeTestFile(t, workspace, "sub/.agents/note.txt", "needle\n")
+
+	matches, _, err := searchWorkspace(workspace, "needle")
+	if err != nil {
+		t.Fatalf("searchWorkspace returned an error: %v", err)
+	}
+	if len(matches) != 1 || matches[0].Path != "sub/.agents/note.txt" {
+		t.Fatalf("unexpected matches: %#v", matches)
+	}
+}

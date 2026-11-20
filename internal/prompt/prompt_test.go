@@ -8,6 +8,14 @@ import (
 	"testing"
 )
 
+func setTestHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	return home
+}
+
 func writePromptTestFile(t *testing.T, workspace string, relativePath string, content string) string {
 	t.Helper()
 	path := filepath.Join(workspace, filepath.FromSlash(relativePath))
@@ -21,6 +29,7 @@ func writePromptTestFile(t *testing.T, workspace string, relativePath string, co
 }
 
 func TestCreateListsAvailableSkillsWithoutLoadingContents(t *testing.T) {
+	setTestHome(t)
 	workspace := t.TempDir()
 	writePromptTestFile(t, workspace, ".agents/skills/find-bugs/SKILL.md", "---\nname: find-bugs\ndescription: Find bugs and security issues\n---\nSECRET BODY\n")
 	writePromptTestFile(t, workspace, ".agents/skills/plain/SKILL.md", "no frontmatter\n")
@@ -37,9 +46,9 @@ func TestCreateListsAvailableSkillsWithoutLoadingContents(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"## Available Skills",
-		"- find-bugs: Find bugs and security issues (.agents/skills/find-bugs/SKILL.md)",
-		"- plain (.agents/skills/plain/SKILL.md)",
-		"Before starting a task, read the SKILL.md of any skill relevant to it.",
+		"- find-bugs: Find bugs and security issues\n",
+		"- plain\n",
+		"Before starting a task, call read_skill for any skill relevant to it.",
 	} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("prompt does not contain %q", expected)
@@ -51,6 +60,7 @@ func TestCreateListsAvailableSkillsWithoutLoadingContents(t *testing.T) {
 }
 
 func TestCreateOmitsSkillsSectionWithoutSkills(t *testing.T) {
+	setTestHome(t)
 	workspace := t.TempDir()
 	writePromptTestFile(t, workspace, ".agents/skills/empty/notes.txt", "no SKILL.md here")
 	writePromptTestFile(t, workspace, ".skills/legacy.md", "legacy skill")
@@ -68,6 +78,7 @@ func TestCreateOmitsSkillsSectionWithoutSkills(t *testing.T) {
 }
 
 func TestCreateSkipsSymbolicLinkSkillsWithWarning(t *testing.T) {
+	setTestHome(t)
 	workspace := t.TempDir()
 	target := t.TempDir()
 	writePromptTestFile(t, target, "SKILL.md", "---\ndescription: linked\n---\n")
@@ -128,6 +139,7 @@ func TestParseSkillDescription(t *testing.T) {
 }
 
 func TestCreateListsAllowedBashCommands(t *testing.T) {
+	setTestHome(t)
 	prompt, _, _, _, err := Create(t.TempDir(), []string{"go test", "git status"})
 	if err != nil {
 		t.Fatalf("Create returned an error: %v", err)
@@ -149,6 +161,7 @@ func TestCreateListsAllowedBashCommands(t *testing.T) {
 }
 
 func TestCreateStatesBashIsDisabledWithoutAllowlist(t *testing.T) {
+	setTestHome(t)
 	for _, allow := range [][]string{nil, {}} {
 		prompt, _, _, _, err := Create(t.TempDir(), allow)
 		if err != nil {
@@ -164,6 +177,7 @@ func TestCreateStatesBashIsDisabledWithoutAllowlist(t *testing.T) {
 }
 
 func TestCreateIncludesPromptGuidance(t *testing.T) {
+	setTestHome(t)
 	prompt, _, _, _, err := Create(t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("Create returned an error: %v", err)
@@ -187,6 +201,7 @@ func TestCreateIncludesPromptGuidance(t *testing.T) {
 }
 
 func TestCreateIncludesProjectInstructionsAndPlan(t *testing.T) {
+	setTestHome(t)
 	workspace := t.TempDir()
 	writePromptTestFile(t, workspace, "AGENTS.md", "be careful")
 	writePromptTestFile(t, workspace, "PLAN.md", "- [ ] step")
@@ -202,5 +217,27 @@ func TestCreateIncludesProjectInstructionsAndPlan(t *testing.T) {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("prompt does not contain %q", expected)
 		}
+	}
+}
+
+func TestCreateListsHomeSkillsAndPrefersWorkspaceSkills(t *testing.T) {
+	home := setTestHome(t)
+	workspace := t.TempDir()
+	writePromptTestFile(t, workspace, ".agents/skills/shared/SKILL.md", "---\ndescription: workspace version\n---\n")
+	writePromptTestFile(t, home, ".agents/skills/shared/SKILL.md", "---\ndescription: home version\n---\n")
+	writePromptTestFile(t, home, ".agents/skills/global/SKILL.md", "---\ndescription: global skill\n---\n")
+
+	prompt, _, skillNames, _, err := Create(workspace, nil)
+	if err != nil {
+		t.Fatalf("Create returned an error: %v", err)
+	}
+	if !reflect.DeepEqual(skillNames, []string{"shared", "global"}) {
+		t.Fatalf("skill names = %v", skillNames)
+	}
+	if !strings.Contains(prompt, "- shared: workspace version\n") || !strings.Contains(prompt, "- global: global skill\n") {
+		t.Fatalf("unexpected skills section: %s", prompt)
+	}
+	if strings.Contains(prompt, "home version") || strings.Contains(prompt, home) {
+		t.Fatal("prompt must not include the overridden skill or the home path")
 	}
 }

@@ -118,7 +118,7 @@ func fitReadOnlyResult(response Response, result ActionResult, maxTransferChars 
 		fitRankedSearchResult(response, result, maxTransferChars)
 	case "tree":
 		fitTreeResult(response, result, maxTransferChars)
-	case "read":
+	case "read", "read_skill":
 		fitReadResult(response, result, maxTransferChars)
 	case "read_range":
 		fitReadRangeResult(response, result, maxTransferChars)

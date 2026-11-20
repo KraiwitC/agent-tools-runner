@@ -31,6 +31,7 @@ type Request struct {
 type Action struct {
 	ID             string        `json:"id"`
 	Operation      string        `json:"operation"`
+	Name           string        `json:"name,omitempty"`
 	Query          string        `json:"query,omitempty"`
 	Paths          []string      `json:"paths,omitempty"`
 	Path           string        `json:"path,omitempty"`
@@ -262,7 +263,18 @@ func validateAction(action Action, index int, actionIDs map[string]struct{}) err
 		return fmt.Errorf("actions[%d] contains command fields that are only supported for bash", index)
 	}
 
+	if action.Operation != "read_skill" && action.Name != "" {
+		return fmt.Errorf("actions[%d] contains name fields that are only supported for read_skill", index)
+	}
+
 	switch action.Operation {
+	case "read_skill":
+		if !isValidSkillName(action.Name) {
+			return fmt.Errorf("actions[%d].name must be a single skill folder name for read_skill", index)
+		}
+		if action.Query != "" || len(action.Paths) != 0 || action.Content != "" || action.ExpectedSHA256 != "" || len(action.Replacements) != 0 {
+			return fmt.Errorf("actions[%d] contains fields that are not supported for read_skill", index)
+		}
 	case "search":
 		if strings.TrimSpace(action.Query) == "" {
 			return fmt.Errorf("actions[%d].query is required for search", index)
@@ -427,6 +439,10 @@ func collectOperationProgress(actions []Action) map[string]operationProgress {
 			progress := progressByOperation["read"]
 			progress = operationProgress{label: "READ", verb: "Reading", noun: "file", count: progress.count + 1}
 			progressByOperation["read"] = progress
+		case "read_skill":
+			progress := progressByOperation["read"]
+			progress = operationProgress{label: "READ", verb: "Reading", noun: "file", count: progress.count + 1}
+			progressByOperation["read"] = progress
 		case "edit":
 			uniqueEditPaths[filepath.Clean(action.Path)] = struct{}{}
 		case "create":
@@ -467,7 +483,7 @@ func collectOperationProgress(actions []Action) map[string]operationProgress {
 
 func printOperationProgress(progress io.Writer, action Action, progressByOperation map[string]operationProgress, shown map[string]bool) {
 	operation := action.Operation
-	if operation == "read_range" {
+	if operation == "read_range" || operation == "read_skill" {
 		operation = "read"
 	}
 	operationProgress, exists := progressByOperation[operation]
@@ -592,6 +608,10 @@ func executeAction(workspace string, action Action, actionIndex int, progress io
 	case "read":
 		var files []ReadFileResult
 		files, responseError = executeReadAction(workspace, action, actionIndex)
+		result.Data = &ActionData{Files: files}
+	case "read_skill":
+		var files []ReadFileResult
+		files, responseError = executeReadSkillAction(workspace, action, actionIndex)
 		result.Data = &ActionData{Files: files}
 	case "read_range":
 		result.Data, responseError = executeReadRangeAction(workspace, action, actionIndex)

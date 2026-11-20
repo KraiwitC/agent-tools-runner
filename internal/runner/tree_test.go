@@ -261,3 +261,29 @@ func assertTreeEntries(t *testing.T, actual []TreeEntry, expected []TreeEntry) {
 		}
 	}
 }
+
+func TestExecuteTreeActionHidesWorkspaceAgentsDirectory(t *testing.T) {
+	workspace := t.TempDir()
+	writeTestFile(t, workspace, ".agents/atr.json", "{}")
+	writeTestFile(t, workspace, ".git/config", "config")
+	writeTestFile(t, workspace, "sub/.agents/note.txt", "nested")
+	writeTestFile(t, workspace, "file.txt", "content")
+	action := Action{ID: "project-tree", Operation: "tree", Path: "."}
+
+	entries, _, _, responseError := executeTreeAction(workspace, action, 0)
+	if responseError != nil {
+		t.Fatalf("executeTreeAction returned an error: %#v", responseError)
+	}
+	assertTreeEntries(t, entries, []TreeEntry{
+		{Path: "file.txt", Type: "file"},
+		{Path: "sub", Type: "directory"},
+		{Path: "sub/.agents", Type: "directory"},
+		{Path: "sub/.agents/note.txt", Type: "file"},
+	})
+
+	entries, _, _, responseError = executeTreeAction(workspace, Action{ID: "agents-tree", Operation: "tree", Path: ".agents"}, 0)
+	if responseError != nil {
+		t.Fatalf("executeTreeAction returned an error: %#v", responseError)
+	}
+	assertTreeEntries(t, entries, []TreeEntry{{Path: ".agents/atr.json", Type: "file"}})
+}

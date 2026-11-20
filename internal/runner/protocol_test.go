@@ -720,3 +720,32 @@ func TestTrimTextToFitKeepsLongestFittingRunes(t *testing.T) {
 		}
 	}
 }
+
+func TestParseAndValidateRequestAcceptsReadSkill(t *testing.T) {
+	requestText := `{"version":"1","actions":[{"id":"skill","operation":"read_skill","name":"review","path":"references/rules.md"}]}`
+
+	request, err := ParseAndValidateRequest(requestText)
+	if err != nil {
+		t.Fatalf("parseAndValidateRequest returned an error: %v", err)
+	}
+	if request.Actions[0].Name != "review" {
+		t.Fatalf("unexpected name: %q", request.Actions[0].Name)
+	}
+}
+
+func TestParseAndValidateRequestRejectsInvalidReadSkill(t *testing.T) {
+	requests := []string{
+		`{"version":"1","actions":[{"id":"a","operation":"read_skill"}]}`,
+		`{"version":"1","actions":[{"id":"a","operation":"read_skill","name":".."}]}`,
+		`{"version":"1","actions":[{"id":"a","operation":"read_skill","name":"a/b"}]}`,
+		`{"version":"1","actions":[{"id":"a","operation":"read_skill","name":"a\\b"}]}`,
+		`{"version":"1","actions":[{"id":"a","operation":"read_skill","name":"c:x"}]}`,
+		`{"version":"1","actions":[{"id":"a","operation":"read_skill","name":"x","query":"q"}]}`,
+		`{"version":"1","actions":[{"id":"a","operation":"read","name":"x","paths":["f"]}]}`,
+	}
+	for _, requestText := range requests {
+		if _, err := ParseAndValidateRequest(requestText); err == nil {
+			t.Fatalf("expected validation error for %s", requestText)
+		}
+	}
+}

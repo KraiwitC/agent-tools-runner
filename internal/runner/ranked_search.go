@@ -51,7 +51,7 @@ func rankedSearchWorkspace(workspace string, query string) ([]RankedSearchMatch,
 			}
 			return nil
 		}
-		if entry.IsDir() && isSearchExcludedDirectory(entry.Name()) {
+		if entry.IsDir() && (isSearchExcludedDirectory(entry.Name()) || isWorkspaceAgentsDirectory(workspace, path)) {
 			return filepath.SkipDir
 		}
 

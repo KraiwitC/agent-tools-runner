@@ -175,6 +175,7 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 	lastResponse := ""
 	autoMode := startAutoMode && clipboardReady
 	lastClipboardRequest := ""
+	lastClipboardResponse := ""
 	autoPromptShown := false
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -223,7 +224,17 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 					continue
 				}
 				trimmedText := strings.TrimSpace(clipboardText)
-				if looksLikeRequest(trimmedText) && trimmedText != lastClipboardRequest {
+				if looksLikeRequest(trimmedText) && trimmedText == lastClipboardRequest {
+					fmt.Println()
+					fmt.Println()
+					if err := atrclipboard.Copy(lastClipboardResponse); err != nil {
+						fmt.Printf("Failed to copy JSON response: %v\n", err)
+					} else {
+						fmt.Println("DUPLICATE   Request already executed. Previous JSON response copied to clipboard.")
+					}
+					fmt.Println()
+					autoPromptShown = false
+				} else if looksLikeRequest(trimmedText) {
 					request, err := runner.ParseAndValidateRequest(trimmedText)
 					if err == nil {
 						lastClipboardRequest = trimmedText
@@ -232,6 +243,7 @@ func runSession(workspace string, clipboardReady bool, scanner *asyncLineScanner
 						fmt.Println()
 						responseText := runner.ExecuteRequest(workspace, request, os.Stdout)
 						lastResponse = responseText
+						lastClipboardResponse = responseText
 						presentResponse(responseText, clipboardReady)
 						autoPromptShown = false
 					}
