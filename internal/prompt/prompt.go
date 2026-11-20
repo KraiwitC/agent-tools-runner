@@ -49,6 +49,7 @@ You are a coding assistant working through Agent Tools Runner (ATR), a local too
 - read {paths}: Read whole files with their SHA-256.
 - read_range {path, startLine, endLine}: Read up to 1000 lines (1-based, inclusive) with the whole-file SHA-256. Prefer it for large files.
 - inspect {path}: Get file size, line count, and SHA-256, or whether a directory is empty.
+- read_skill {name, path}: Read a skill file from the workspace or user skill folder. path is optional, relative to the skill folder, and defaults to SKILL.md.
 
 If a result is truncated or reaches the transfer limit, request the missing content in smaller batches unless the available data is sufficient.
 
@@ -157,28 +158,54 @@ func readTaskPlan(workspace string) (string, bool, error) {
 type skill struct {
 	name        string
 	description string
-	path        string
 }
 
 func readSkills(workspace string) ([]skill, []string, error) {
-	skillsDisplayPath := path.Join(AgentsDirectoryName, SkillsDirectoryName)
-	for _, directory := range []string{AgentsDirectoryName, skillsDisplayPath} {
-		info, err := os.Lstat(filepath.Join(workspace, filepath.FromSlash(directory)))
+	skills, warnings, err := readSkillsFromRoot(workspace, "")
+	if err != nil {
+		return nil, nil, err
+	}
+	homeDirectory, err := os.UserHomeDir()
+	if err != nil {
+		return skills, warnings, nil
+	}
+	homeSkills, homeWarnings, err := readSkillsFromRoot(homeDirectory, "~/")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	seen := make(map[string]struct{}, len(skills))
+	for _, workspaceSkill := range skills {
+		seen[workspaceSkill.name] = struct{}{}
+	}
+	for _, homeSkill := range homeSkills {
+		if _, exists := seen[homeSkill.name]; !exists {
+			skills = append(skills, homeSkill)
+		}
+	}
+	return skills, append(warnings, homeWarnings...), nil
+}
+
+func readSkillsFromRoot(baseDirectory string, displayPrefix string) ([]skill, []string, error) {
+	skillsDisplayPath := displayPrefix + path.Join(AgentsDirectoryName, SkillsDirectoryName)
+	for _, directory := range []string{AgentsDirectoryName, path.Join(AgentsDirectoryName, SkillsDirectoryName)} {
+		displayDirectory := displayPrefix + directory
+		info, err := os.Lstat(filepath.Join(baseDirectory, filepath.FromSlash(directory)))
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil, nil
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("inspect %s: %w", directory, err)
+			return nil, nil, fmt.Errorf("inspect %s: %w", displayDirectory, err)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return nil, []string{fmt.Sprintf("Skipped skills: %s is a symbolic link.", directory)}, nil
+			return nil, []string{fmt.Sprintf("Skipped skills: %s is a symbolic link.", displayDirectory)}, nil
 		}
 		if !info.IsDir() {
 			return nil, nil, nil
 		}
 	}
 
-	skillsDirectory := filepath.Join(workspace, filepath.FromSlash(skillsDisplayPath))
+	skillsDirectory := filepath.Join(baseDirectory, AgentsDirectoryName, SkillsDirectoryName)
 	entries, err := os.ReadDir(skillsDirectory)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", skillsDisplayPath, err)
@@ -190,7 +217,7 @@ func readSkills(workspace string) ([]skill, []string, error) {
 		skillPath := path.Join(skillsDisplayPath, entry.Name(), SkillFileName)
 		skillFilePath := filepath.Join(skillsDirectory, entry.Name(), SkillFileName)
 		if entry.Type()&os.ModeSymlink != 0 {
-			warnings = append(warnings, fmt.Sprintf("Skipped skill %s: symbolic links are not supported.", entry.Name()))
+			warnings = append(warnings, fmt.Sprintf("Skipped skill %s: symbolic links are not supported.", skillsDisplayPath+"/"+entry.Name()))
 			continue
 		}
 		if !entry.IsDir() {
@@ -204,7 +231,7 @@ func readSkills(workspace string) ([]skill, []string, error) {
 			return nil, nil, fmt.Errorf("inspect %s: %w", skillPath, err)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			warnings = append(warnings, fmt.Sprintf("Skipped skill %s: %s is a symbolic link.", entry.Name(), SkillFileName))
+			warnings = append(warnings, fmt.Sprintf("Skipped skill %s: %s is a symbolic link.", skillsDisplayPath+"/"+entry.Name(), SkillFileName))
 			continue
 		}
 		if !info.Mode().IsRegular() {
@@ -212,9 +239,9 @@ func readSkills(workspace string) ([]skill, []string, error) {
 		}
 		description, err := readSkillDescription(skillFilePath)
 		if err != nil {
-			return nil, nil, fmt.Errorf("read skill %s: %w", entry.Name(), err)
+			return nil, nil, fmt.Errorf("read skill %s: %w", skillPath, err)
 		}
-		skills = append(skills, skill{name: entry.Name(), description: description, path: skillPath})
+		skills = append(skills, skill{name: entry.Name(), description: description})
 	}
 	return skills, warnings, nil
 }
@@ -290,9 +317,9 @@ func buildBootstrapPrompt(repositoryInstructions string, agentsFileFound bool, t
 			if availableSkill.description != "" {
 				prompt.WriteString(": " + availableSkill.description)
 			}
-			prompt.WriteString(" (" + availableSkill.path + ")\n")
+			prompt.WriteString("\n")
 		}
-		prompt.WriteString("\nBefore starting a task, read the " + SkillFileName + " of any skill relevant to it.\n")
+		prompt.WriteString("\nBefore starting a task, call read_skill for any skill relevant to it. Use its path field to read files the skill references.\n")
 	}
 	prompt.WriteString("\n# User Instructions\n\n")
 	return prompt.String()

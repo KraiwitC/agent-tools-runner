@@ -56,6 +56,9 @@ func responseOperationLabel(operation string) string {
 	if operation == "ranked_search" {
 		return "R_SEARCH"
 	}
+	if operation == "read_skill" {
+		return "SKILL"
+	}
 	return strings.ToUpper(operation)
 }
 
@@ -81,6 +84,13 @@ func summarizeActionResult(result runner.ActionResult) string {
 			paths = append(paths, file.Path)
 		}
 		return strings.Join(paths, "\n  READ      ")
+	case "read_skill":
+		if len(data.Files) == 0 {
+			return result.ID
+		}
+		_, skillPath, _ := strings.Cut(data.Files[0].Path, "/skills/")
+		name, _, _ := strings.Cut(skillPath, "/")
+		return name
 	case "read_range":
 		return fmt.Sprintf("%s (lines %d-%d of %d)", data.Path, data.StartLine, data.EndLine, data.TotalLines)
 	case "edit":

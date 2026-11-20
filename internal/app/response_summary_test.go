@@ -373,3 +373,30 @@ func marshalSummaryTestResponse(t *testing.T, response runner.Response) string {
 	}
 	return string(content)
 }
+
+func TestSummarizeResponseSummarizesReadSkill(t *testing.T) {
+	response := runner.Response{
+		Version: "1",
+		Status:  "success",
+		Results: []runner.ActionResult{
+			{
+				ID:        "skill",
+				Operation: "read_skill",
+				Status:    "success",
+				Data: &runner.ActionData{
+					Files: []runner.ReadFileResult{{Path: "~/.agents/skills/review/SKILL.md", Content: "secret body"}},
+				},
+			},
+		},
+	}
+
+	summary, err := summarizeResponse(marshalSummaryTestResponse(t, response))
+	if err != nil {
+		t.Fatalf("summarizeResponse returned an error: %v", err)
+	}
+
+	expected := "\nSUCCESS\n\n  SKILL     review"
+	if summary != expected {
+		t.Fatalf("unexpected summary:\n%s\n\nexpected:\n%s", summary, expected)
+	}
+}
